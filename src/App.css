@@ -1,0 +1,519 @@
+/* Same palette and "ledger paper / terminal" beveled look as the real
+   mining site (piko-icp/frontend/src/index.css + App.css), reproduced here
+   since this is a separate app/repo -- keeps the native miner visually
+   part of the same family instead of looking like a generic dev tool. */
+:root {
+  color-scheme: light;
+  --bg: #f2ede1;
+  --surface: #fbf8f0;
+  --surface-2: #eae2cf;
+  --border: #ddd2b3;
+  --text: #1a1508;
+  --text-secondary: #5c5340;
+  --text-muted: #8f8468;
+  --accent: #b1550f;
+  --accent-soft: #f5ddc4;
+  --accent-ink: #fffaf0;
+  --spark: #1a56b8;
+  --good: #29713f;
+  --critical: #b0261c;
+  --mono-bg: #e9dfc4;
+  --mono-fg: #1a1508;
+  --bevel-hi: #fffdf7;
+  --bevel-lo: #a8975f;
+  --hard-shadow: rgba(26, 21, 8, 0.4);
+  --font-display: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-display);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #050403;
+    --surface: #0e0c09;
+    --surface-2: #17130f;
+    --border: #2a251d;
+    --text: #f5efdf;
+    --text-secondary: #b3a98f;
+    --text-muted: #756c58;
+    --accent: #f2803a;
+    --accent-soft: #3a2410;
+    --accent-ink: #140d02;
+    --spark: #3d9bff;
+    --good: #4fbf85;
+    --critical: #ff5c4d;
+    --mono-bg: #120f0a;
+    --mono-fg: #f5efdf;
+    --bevel-hi: #56492c;
+    --bevel-lo: #000000;
+    --hard-shadow: rgba(0, 0, 0, 0.6);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+/* Desktop windows are typically wide, not tall -- a single narrow column
+   like a phone layout wastes most of the window. Network+Wallet share a
+   row, Mine takes the full width below it (it's the primary action, worth
+   more horizontal room for its stat row). Falls back to one column
+   (mobile-style) automatically below the breakpoint, so this also is what
+   a phone build would already look like if one existed (see the app's own
+   answer on mobile support). */
+.panels {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (min-width: 820px) {
+  .panels {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .panels > .panel-mine {
+    grid-column: 1 / -1;
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.brand-logo {
+  width: 40px;
+  height: 40px;
+}
+
+.brand-name {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.brand-sub {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.autostart-toggle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.difficulty-chart {
+  width: 100%;
+  height: 48px;
+  display: block;
+  background: var(--surface-2);
+  border-style: solid;
+  border-width: 2px;
+  border-top-color: var(--bevel-lo);
+  border-left-color: var(--bevel-lo);
+  border-bottom-color: var(--bevel-hi);
+  border-right-color: var(--bevel-hi);
+}
+
+.difficulty-chart-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* ---- Beveled "block" cards, matching the site exactly ---- */
+
+section.block {
+  background: var(--surface);
+  border-style: solid;
+  border-width: 2px;
+  border-top-color: var(--bevel-hi);
+  border-left-color: var(--bevel-hi);
+  border-bottom-color: var(--bevel-lo);
+  border-right-color: var(--bevel-lo);
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+  /* Belt-and-suspenders against any child (e.g. the pulsing CTA button's
+     own animated glow) visually spilling past the card edge -- this clips
+     content, not the card's own box-shadow above (that's the element's own
+     box, never affected by its own overflow setting). */
+  overflow: hidden;
+}
+
+section.block h2 {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin: 0;
+  padding: 8px 16px;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-bottom: 2px solid var(--bevel-lo);
+}
+
+section.block > *:not(h2) {
+  margin-left: 18px;
+  margin-right: 18px;
+}
+
+section.block > h2 + * {
+  margin-top: 16px;
+}
+
+section.block > * + * {
+  margin-top: 14px;
+}
+
+section.block > *:last-child {
+  margin-bottom: 18px;
+}
+
+/* ---- Stats ---- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.stat-tile,
+.wallet-balance-tile {
+  background: var(--surface-2);
+  padding: 12px 14px;
+  border-style: solid;
+  border-width: 2px;
+  border-top-color: var(--bevel-lo);
+  border-left-color: var(--bevel-lo);
+  border-bottom-color: var(--bevel-hi);
+  border-right-color: var(--bevel-hi);
+}
+
+.stat-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value.hot {
+  color: var(--spark);
+}
+
+.stat-value-suffix {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* ---- Wallet ---- */
+
+.wallet-balances {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.token-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.token-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.token-toggle-btn .token-icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+.wallet-address-row,
+.principal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wallet-address,
+.principal-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  background: var(--mono-bg);
+  color: var(--mono-fg);
+  padding: 9px 11px;
+  overflow-x: auto;
+  white-space: nowrap;
+  border-style: solid;
+  border-width: 2px;
+  border-top-color: var(--bevel-lo);
+  border-left-color: var(--bevel-lo);
+  border-bottom-color: var(--bevel-hi);
+  border-right-color: var(--bevel-hi);
+}
+
+.wallet-send {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.token-toggle {
+  display: inline-flex;
+  gap: 4px;
+  width: fit-content;
+  background: var(--surface-2);
+  padding: 3px;
+  border-style: solid;
+  border-width: 2px;
+  border-top-color: var(--bevel-lo);
+  border-left-color: var(--bevel-lo);
+  border-bottom-color: var(--bevel-hi);
+  border-right-color: var(--bevel-hi);
+}
+
+.token-toggle-btn {
+  appearance: none;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 6px 14px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+}
+
+.token-toggle-btn.active {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.wallet-send-row {
+  display: flex;
+  gap: 8px;
+}
+
+.wallet-send-row .input {
+  flex: 1;
+}
+
+.wallet-status,
+.hint {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.hint.warning {
+  color: var(--critical);
+  font-weight: 700;
+}
+
+/* ---- Buttons & inputs ---- */
+
+.input {
+  appearance: none;
+  font-family: var(--font-sans);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 9px 12px;
+  font-size: 0.88rem;
+  width: 100%;
+  border-style: solid;
+  border-width: 2px;
+  border-top-color: var(--bevel-lo);
+  border-left-color: var(--bevel-lo);
+  border-bottom-color: var(--bevel-hi);
+  border-right-color: var(--bevel-hi);
+}
+
+.button {
+  appearance: none;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--surface-2);
+  padding: 9px 16px;
+  border-style: solid;
+  border-width: 2px;
+  border-top-color: var(--bevel-hi);
+  border-left-color: var(--bevel-hi);
+  border-bottom-color: var(--bevel-lo);
+  border-right-color: var(--bevel-lo);
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+}
+
+.button:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.button:active:not(:disabled) {
+  border-top-color: var(--bevel-lo);
+  border-left-color: var(--bevel-lo);
+  border-bottom-color: var(--bevel-hi);
+  border-right-color: var(--bevel-hi);
+  box-shadow: none;
+  transform: translate(3px, 3px);
+}
+
+.button.secondary {
+  background: var(--surface);
+}
+
+.button.small {
+  padding: 5px 10px;
+  font-size: 0.76rem;
+}
+
+.button.big {
+  width: 100%;
+  padding: 14px;
+  font-size: 1rem;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.button-cta {
+  background: var(--accent);
+  color: var(--accent-ink);
+  animation: cta-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes cta-breathe {
+  0%,
+  100% {
+    box-shadow:
+      3px 3px 0 var(--hard-shadow),
+      0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  50% {
+    box-shadow:
+      3px 3px 0 var(--hard-shadow),
+      0 0 0 8px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button-cta {
+    animation: none;
+  }
+}
+
+.approve-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.power-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.power-label {
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.power-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.power-btn.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.power-hint {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.approve-blocks-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.approve-blocks-input {
+  width: 64px;
+  text-align: center;
+}
+
+.mining-message {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.mining-message.good {
+  color: var(--good);
+  font-weight: 700;
+}
+
+.mining-message.critical {
+  color: var(--critical);
+  font-weight: 700;
+}
+
+.empty-state {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 40px 0;
+}
