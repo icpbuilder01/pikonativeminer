@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="piko-coin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3987e5"/>
+      <stop offset="100%" stop-color="#5b4bc4"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="62" fill="url(#piko-coin)"/>
+  <circle cx="64" cy="64" r="61" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="1.5"/>
+  <rect x="40" y="34" width="16" height="60" rx="5" fill="#ffffff"/>
+  <circle cx="65" cy="51" r="23" fill="#ffffff"/>
+  <circle cx="65" cy="51" r="11.5" fill="url(#piko-coin)"/>
+</svg>
