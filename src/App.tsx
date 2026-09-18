@@ -734,7 +734,16 @@ function App() {
                   <button className="button secondary" onClick={handleApprovePool} disabled={approvingPool}>
                     {approvingPool ? "Approving..." : "Approve ICP for pool"}
                   </button>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={handleClaimPoolReward}
+                    disabled={claiming || !poolPendingReward || poolPendingReward === "0"}
+                  >
+                    {claiming ? "Claiming..." : "Claim pool reward"}
+                  </button>
                 </div>
+                {claimStatus && <p className="wallet-status">{claimStatus}</p>}
 
                 <div className="stat-grid">
                   <div className="stat-tile">
@@ -762,16 +771,6 @@ function App() {
                     </div>
                   </div>
                 </div>
-
-                <button
-                  type="button"
-                  className="button secondary"
-                  onClick={handleClaimPoolReward}
-                  disabled={claiming || !poolPendingReward || poolPendingReward === "0"}
-                >
-                  {claiming ? "Claiming..." : "Claim pool reward"}
-                </button>
-                {claimStatus && <p className="wallet-status">{claimStatus}</p>}
               </div>
             )}
 
