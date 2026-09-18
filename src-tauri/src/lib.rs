@@ -9,6 +9,7 @@ use ic_agent::Agent;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex as AsyncMutex;
@@ -50,6 +51,12 @@ struct AppState {
     // redo the adapter enumeration on every single UI query.
     gpu_adapter_name: Option<String>,
     gpu_enabled: Arc<AtomicBool>,
+    // Set whenever a GPU search thread fails to actually start (adapter
+    // request or device creation failed at runtime, distinct from probe()
+    // finding nothing at startup) -- surfaced to the UI so "I checked the
+    // box but hashrate didn't change" has a visible reason instead of
+    // silently falling back to CPU-only with no explanation.
+    gpu_error: Arc<StdMutex<Option<String>>>,
     pool_enabled: Arc<AtomicBool>,
 }
 
@@ -259,11 +266,12 @@ async fn start_mining(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     let running_flag = Arc::clone(&state.mining_running);
     let power_percent = Arc::clone(&state.power_percent);
     let gpu_enabled = Arc::clone(&state.gpu_enabled);
+    let gpu_error = Arc::clone(&state.gpu_error);
     let pool_enabled = Arc::clone(&state.pool_enabled);
     let app_handle = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        mining_supervisor(app_handle, agent, owner, stop_flag, running_flag, power_percent, gpu_enabled, pool_enabled).await;
+        mining_supervisor(app_handle, agent, owner, stop_flag, running_flag, power_percent, gpu_enabled, gpu_error, pool_enabled).await;
     });
 
     Ok(())
@@ -306,6 +314,16 @@ fn get_gpu_enabled(state: State<'_, AppState>) -> bool {
 fn set_gpu_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     state.gpu_enabled.store(enabled, Ordering::Relaxed);
     Ok(())
+}
+
+/// Set only if a GPU search thread was actually attempted (gpu_enabled was
+/// on for a job) and failed to start -- distinct from gpu_adapter_name
+/// being null, which means no GPU was ever found to try in the first
+/// place. Lets the UI tell "your GPU wasn't detected at all" apart from
+/// "your GPU was detected but mining on it failed to actually start."
+#[tauri::command]
+fn gpu_error(state: State<'_, AppState>) -> Option<String> {
+    state.gpu_error.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -363,6 +381,7 @@ async fn mining_supervisor(
     running_flag: Arc<AsyncMutex<bool>>,
     power_percent: Arc<AtomicU32>,
     gpu_enabled: Arc<AtomicBool>,
+    gpu_error: Arc<StdMutex<Option<String>>>,
     pool_enabled: Arc<AtomicBool>,
 ) {
     let num_threads = num_cpus::get();
@@ -488,6 +507,7 @@ async fn mining_supervisor(
                 Arc::clone(&job_hash_count),
                 tx.clone(),
                 share_tx.clone(),
+                Arc::clone(&gpu_error),
             ) {
                 handle.add_threads(vec![gpu_thread]);
             }
@@ -776,6 +796,7 @@ pub fn run() {
                 power_percent: Arc::new(AtomicU32::new(100)),
                 gpu_adapter_name,
                 gpu_enabled: Arc::new(AtomicBool::new(false)),
+                gpu_error: Arc::new(StdMutex::new(None)),
                 pool_enabled: Arc::new(AtomicBool::new(false)),
             });
 
@@ -835,6 +856,7 @@ pub fn run() {
             gpu_adapter_name,
             get_gpu_enabled,
             set_gpu_enabled,
+            gpu_error,
             get_pool_enabled,
             set_pool_enabled,
             get_pool_icp_allowance,

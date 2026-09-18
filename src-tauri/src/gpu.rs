@@ -20,7 +20,7 @@ use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::thread;
 use std::time::Instant;
 
@@ -132,9 +132,10 @@ pub fn start_gpu_mining(
     hash_count: Arc<AtomicU64>,
     tx: Sender<u64>,
     share_tx: Option<Sender<u64>>,
+    error_slot: Arc<StdMutex<Option<String>>>,
 ) -> Option<thread::JoinHandle<()>> {
     Some(thread::spawn(move || {
-        pollster::block_on(gpu_mine_loop(job, power_percent, stop_flag, hash_count, tx, share_tx));
+        pollster::block_on(gpu_mine_loop(job, power_percent, stop_flag, hash_count, tx, share_tx, error_slot));
     }))
 }
 
@@ -145,14 +146,28 @@ async fn gpu_mine_loop(
     hash_count: Arc<AtomicU64>,
     tx: Sender<u64>,
     share_tx: Option<Sender<u64>>,
+    error_slot: Arc<StdMutex<Option<String>>>,
 ) {
+    // Cleared at the start of every attempt so a job that succeeds after an
+    // earlier failure (e.g. a driver hiccup that clears on its own) doesn't
+    // leave a stale warning showing in the UI forever.
+    *error_slot.lock().unwrap() = None;
+
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         ..Default::default()
     });
     let adapter = match pick_adapter(&instance).await {
         Some(a) => a,
-        None => return, // no GPU to mine with -- CPU threads carry the job alone
+        None => {
+            // probe() found an adapter at startup but it's gone now (e.g. an
+            // eGPU unplugged, or a driver that only exposes it sometimes) --
+            // rare, but distinct enough from "device creation failed" to say
+            // so rather than reusing that message.
+            *error_slot.lock().unwrap() =
+                Some("no longer detected (was available at startup)".to_string());
+            return; // no GPU to mine with -- CPU threads carry the job alone
+        }
     };
     let (device, queue) = match adapter
         .request_device(
@@ -167,7 +182,10 @@ async fn gpu_mine_loop(
         .await
     {
         Ok(pair) => pair,
-        Err(_) => return,
+        Err(e) => {
+            *error_slot.lock().unwrap() = Some(format!("device creation failed ({e})"));
+            return;
+        }
     };
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

@@ -434,7 +434,13 @@ section.block > *:last-child {
 }
 
 .button.big {
-  width: 100%;
+  /* Not 100% -- this element also gets the 18px left/right margin from
+     `section.block > *:not(h2)` above, and width:100% doesn't account for
+     an element's own margins. Left uncorrected, the button was 36px wider
+     than its container; section.block's overflow:hidden clipped the extra
+     off the right edge only, so the button looked flush with the card's
+     right border but not its left one. */
+  width: calc(100% - 36px);
   padding: 14px;
   font-size: 1rem;
 }
