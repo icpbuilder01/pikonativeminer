@@ -33,9 +33,13 @@ pub fn load_or_create_identity() -> Result<BasicIdentity> {
         let mut key = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut key);
         fs::write(&path, key).context("failed to save a newly generated identity key")?;
-        restrict_to_owner(&path)?;
         key
     };
+    // Re-applied on every load, not just at creation -- an install from
+    // before this restriction existed would otherwise keep its
+    // world-readable key forever, since this function's `if path.exists()`
+    // branch never touches permissions on its own.
+    restrict_to_owner(&path)?;
     Ok(BasicIdentity::from_raw_key(&key_bytes))
 }
 
