@@ -28,6 +28,15 @@ pub struct Stats {
 }
 
 #[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct Block {
+    pub hash: ByteBuf,
+    pub height: Nat,
+    pub miner: Principal,
+    pub reward: Nat,
+    pub timestamp: candid::Int,
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
 pub struct LeaderboardEntry {
     pub blocksFound: Nat,
     pub miner: Principal,

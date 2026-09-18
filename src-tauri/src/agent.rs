@@ -43,6 +43,18 @@ pub async fn get_stats(agent: &Agent) -> Result<Stats> {
     Ok(stats)
 }
 
+pub async fn get_recent_blocks(agent: &Agent) -> Result<Vec<Block>> {
+    let canister_id = Principal::from_text(MOTHER_CANISTER_ID)?;
+    let response = agent
+        .query(&canister_id, "getRecentBlocks")
+        .with_arg(Encode!()?)
+        .call()
+        .await
+        .context("getRecentBlocks call failed")?;
+    let blocks = Decode!(response.as_slice(), Vec<Block>)?;
+    Ok(blocks)
+}
+
 pub async fn get_miner_stats(agent: &Agent, owner: Principal) -> Result<LeaderboardEntry> {
     let canister_id = Principal::from_text(MOTHER_CANISTER_ID)?;
     let response = agent
