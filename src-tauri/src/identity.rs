@@ -33,7 +33,25 @@ pub fn load_or_create_identity() -> Result<BasicIdentity> {
         let mut key = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut key);
         fs::write(&path, key).context("failed to save a newly generated identity key")?;
+        restrict_to_owner(&path)?;
         key
     };
     Ok(BasicIdentity::from_raw_key(&key_bytes))
+}
+
+// This file holds the raw private key controlling the wallet -- on Unix,
+// fs::write() otherwise leaves it at the umask's default (typically
+// world-readable), letting any other local account read it. Windows'
+// per-user profile ACLs already restrict this directory to the owner, so
+// there's nothing equivalent to tighten there.
+#[cfg(unix)]
+fn restrict_to_owner(path: &PathBuf) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .context("failed to restrict the identity key file's permissions")
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &PathBuf) -> Result<()> {
+    Ok(())
 }
