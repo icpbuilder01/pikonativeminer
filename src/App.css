@@ -245,6 +245,12 @@ section.block > *:last-child {
   color: var(--text-muted);
 }
 
+.stat-value-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ---- Wallet ---- */
 
 .wallet-balances {

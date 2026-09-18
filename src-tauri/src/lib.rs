@@ -469,6 +469,22 @@ fn emit_stopped(app: &AppHandle, session_attempts: u64, session_blocks: u64, mes
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be registered first (Tauri's own recommendation): without
+        // this, launching the app a second time (e.g. from the desktop
+        // icon, since GNOME hides the tray icon by default and the window
+        // is only hidden -- not closed -- on X) spawns a whole separate OS
+        // process with its own fresh AppState instead of focusing the
+        // already-running one. That second process shows "not mining" (0
+        // hashrate, Start button enabled) while the real, hidden first
+        // process keeps mining untouched -- and quitting the second process
+        // does nothing to the first. This plugin makes a second launch a
+        // no-op that just shows/focuses the existing window instead.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
