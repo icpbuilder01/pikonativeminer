@@ -3736,7 +3736,7 @@ dependencies = [
 
 [[package]]
 name = "pikonativeminer"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "bytemuck",
