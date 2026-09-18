@@ -115,8 +115,14 @@ body {
   color: var(--text-muted);
 }
 
-.autostart-toggle {
+.header-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.autostart-toggle {
   display: flex;
   align-items: center;
   gap: 6px;

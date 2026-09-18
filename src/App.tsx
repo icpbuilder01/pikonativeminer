@@ -227,6 +227,10 @@ function App() {
     }
   }
 
+  async function handleQuit() {
+    await invoke("quit_app");
+  }
+
   useEffect(() => {
     const unlisten = listen<MiningProgress>("mining-progress", (event) => {
       const p = event.payload;
@@ -320,12 +324,17 @@ function App() {
           <div className="brand-name">PIKO Native Miner</div>
           <div className="brand-sub">Real hardware-accelerated hashing, no browser needed</div>
         </div>
-        {autostart !== null && (
-          <label className="autostart-toggle">
-            <input type="checkbox" checked={autostart} onChange={handleToggleAutostart} />
-            Launch at login
-          </label>
-        )}
+        <div className="header-actions">
+          {autostart !== null && (
+            <label className="autostart-toggle">
+              <input type="checkbox" checked={autostart} onChange={handleToggleAutostart} />
+              Launch at login
+            </label>
+          )}
+          <button type="button" className="button secondary small" onClick={handleQuit} title="Fully exit -- closing this window with X only hides it so mining keeps running in the background">
+            Quit
+          </button>
+        </div>
       </header>
 
       {!principal ? (
