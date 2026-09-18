@@ -523,3 +523,64 @@ section.block > *:last-child {
   text-align: center;
   padding: 40px 0;
 }
+
+/* ---- Confetti + win flash ---- */
+
+.win-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 49;
+  background: radial-gradient(
+    circle at 50% 0%,
+    color-mix(in srgb, var(--spark) 30%, transparent),
+    transparent 55%
+  );
+  animation: flash-fade 1.1s ease-out forwards;
+}
+
+@keyframes flash-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .win-flash {
+    display: none;
+  }
+}
+
+.confetti-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 50;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -12px;
+  width: 7px;
+  height: 7px;
+  animation-name: confetti-fall;
+  animation-timing-function: ease-in;
+  animation-fill-mode: forwards;
+}
+
+@keyframes confetti-fall {
+  to {
+    top: 100vh;
+    transform: translateX(var(--drift)) rotate(var(--rotate));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti-root {
+    display: none;
+  }
+}

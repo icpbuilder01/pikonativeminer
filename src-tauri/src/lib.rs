@@ -79,6 +79,8 @@ struct NetworkStats {
     current_reward: String,
     #[serde(rename = "miningFeeE8s")]
     mining_fee_e8s: String,
+    #[serde(rename = "lastBlockAtNanos")]
+    last_block_at_nanos: Option<i64>,
 }
 
 #[tauri::command]
@@ -116,6 +118,15 @@ fn quit_app(app: AppHandle) {
 #[tauri::command]
 async fn get_network_stats(state: State<'_, AppState>) -> Result<NetworkStats, String> {
     let stats = agent::get_stats(&state.agent).await.map_err(|e| e.to_string())?;
+    // getRecentBlocks is ordered oldest-to-newest, so the last entry (if any)
+    // is the most recently mined block network-wide, by anyone -- not just
+    // this miner. Best-effort: a failure here shouldn't sink the whole
+    // network-stats refresh, so it just leaves the "last block" tile blank.
+    let last_block_at_nanos = agent::get_recent_blocks(&state.agent)
+        .await
+        .ok()
+        .and_then(|blocks| blocks.last().map(|b| b.timestamp.0.clone()))
+        .and_then(|t| t.try_into().ok());
     Ok(NetworkStats {
         height: nat_to_plain_string(&stats.height),
         difficulty_bits: stats.difficultyBits.0.try_into().unwrap_or(0),
@@ -126,6 +137,7 @@ async fn get_network_stats(state: State<'_, AppState>) -> Result<NetworkStats, S
         next_halving_height: nat_to_plain_string(&stats.nextHalvingHeight),
         current_reward: nat_to_plain_string(&stats.currentReward),
         mining_fee_e8s: nat_to_plain_string(&stats.miningFeeE8s),
+        last_block_at_nanos,
     })
 }
 

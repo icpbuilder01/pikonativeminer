@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Confetti } from "./components/Confetti";
 import "./App.css";
 
 interface MiningProgress {
@@ -22,6 +23,7 @@ interface NetworkStats {
   nextHalvingHeight: string;
   currentReward: string;
   miningFeeE8s: string;
+  lastBlockAtNanos: number | null;
 }
 
 interface DifficultyPoint {
@@ -89,6 +91,15 @@ function formatCount(n: number): string {
   return `${value.toFixed(value < 10 ? 2 : 1)}${units[i]}`;
 }
 
+function formatElapsed(sinceNanos: number, nowMillis: number): string {
+  const seconds = Math.max(0, Math.round(nowMillis / 1000 - sinceNanos / 1e9));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m ago`;
+}
+
 // No historical-difficulty API exists (mother only ever exposes the
 // *current* value) -- this plots whatever this app has personally observed
 // since it started running, a real if short-lived retargeting curve rather
@@ -144,6 +155,7 @@ function App() {
   const [totalBlocks, setTotalBlocks] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [messageKind, setMessageKind] = useState<string>("");
+  const [confettiTrigger, setConfettiTrigger] = useState(0);
   const [copied, setCopied] = useState(false);
 
   const [sendToken, setSendToken] = useState<Token>("PIKO");
@@ -155,6 +167,12 @@ function App() {
   const [networkStats, setNetworkStats] = useState<NetworkStats | null>(null);
   const [difficultyHistory, setDifficultyHistory] = useState<DifficultyPoint[]>([]);
   const [autostart, setAutostartState] = useState<boolean | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const refreshBalances = useCallback(async () => {
     try {
@@ -241,7 +259,10 @@ function App() {
       if (p.message) {
         setMessage(p.message);
         setMessageKind(p.messageKind);
-        if (p.messageKind === "good") refreshBalances();
+        if (p.messageKind === "good") {
+          refreshBalances();
+          setConfettiTrigger((n) => n + 1);
+        }
       }
       // The backend loop has actually exited (e.g. exhausted ICP
       // allowance) -- reflect that in the UI instead of leaving the Stop
@@ -327,6 +348,7 @@ function App() {
 
   return (
     <main className="container">
+      <Confetti trigger={confettiTrigger} />
       <header className="header">
         <img src="/piko-logo.svg" alt="" className="brand-logo" />
         <div>
@@ -371,6 +393,26 @@ function App() {
             <div>
               <div className="stat-label">Difficulty over time (this session)</div>
               <DifficultyChart points={difficultyHistory} />
+            </div>
+            <div className="stat-grid">
+              <div className="stat-tile">
+                <div className="stat-label">Block reward</div>
+                <div className="stat-value">
+                  {networkStats ? `${formatAmount(networkStats.currentReward)} PIKO` : "..."}
+                </div>
+              </div>
+              <div className="stat-tile">
+                <div className="stat-label">Mining fee</div>
+                <div className="stat-value">
+                  {networkStats ? `${formatAmount(networkStats.miningFeeE8s)} ICP` : "..."}
+                </div>
+              </div>
+              <div className="stat-tile">
+                <div className="stat-label">Last block</div>
+                <div className="stat-value">
+                  {networkStats?.lastBlockAtNanos != null ? formatElapsed(networkStats.lastBlockAtNanos, now) : "..."}
+                </div>
+              </div>
             </div>
           </section>
 
