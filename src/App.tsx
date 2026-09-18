@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Confetti } from "./components/Confetti";
@@ -179,25 +179,9 @@ function App() {
   const [poolShares, setPoolShares] = useState<number | null>(null);
   const [poolPendingReward, setPoolPendingReward] = useState<string | null>(null);
   const [poolRoundTotalShares, setPoolRoundTotalShares] = useState<number | null>(null);
-  const [poolHashrate, setPoolHashrate] = useState<number | null>(null);
+  const [poolActiveMiners, setPoolActiveMiners] = useState<number | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [claimStatus, setClaimStatus] = useState<string | null>(null);
-  // Recent (timestamp, currentRoundTotalShares) samples the hashrate
-  // estimate below is measured across -- a ref, not state, since only the
-  // derived rate needs to trigger a render. Shares arrive as a Poisson
-  // process, so at low hashrate (a lone miner, or a low share rate
-  // relative to shareDifficultyBits) a single 10s window-over-window delta
-  // is almost pure noise -- most 10s windows see zero arrivals by chance
-  // (reading as a stuck 0 H/s), and an occasional window with 2-3 arrivals
-  // reads as several times the real hashrate. Averaging across a sliding
-  // POOL_HASHRATE_WINDOW_MS window instead smooths that out, while still
-  // catching up to a real change (a participant's power setting, someone
-  // joining/leaving) within that window -- unlike measuring from a single
-  // ever-growing baseline since the last round reset, which converges to
-  // a more accurate long-run figure but reacts more slowly the longer the
-  // app keeps running.
-  const POOL_HASHRATE_WINDOW_MS = 120_000;
-  const poolShareSamplesRef = useRef<{ t: number; shares: number }[]>([]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -257,52 +241,16 @@ function App() {
 
   const refreshPoolStatus = useCallback(async () => {
     try {
-      const [allow, [sharesStr, pendingReward], [totalSharesStr, shareBitsStr]] = await Promise.all([
+      const [allow, [sharesStr, pendingReward], [totalSharesStr, activeMinersStr]] = await Promise.all([
         invoke<string>("get_pool_icp_allowance"),
         invoke<[string, string]>("get_my_pool_share"),
         invoke<[string, string]>("get_pool_stats"),
       ]);
       setPoolAllowance(allow);
-      const shares = Number(sharesStr);
-      const totalShares = Number(totalSharesStr);
-      setPoolShares(shares);
+      setPoolShares(Number(sharesStr));
       setPoolPendingReward(pendingReward);
-      setPoolRoundTotalShares(totalShares);
-
-      // Shares arrive at a Poisson rate proportional to hashrate at a fixed
-      // difficulty (the same principle real mining pools use to estimate
-      // hashrate from submission rate) -- so the pool-wide rate of new
-      // shares across the sliding window below, scaled by
-      // 2^shareDifficultyBits, is an estimate of the pool's combined
-      // hashrate. See POOL_HASHRATE_WINDOW_MS's own comment for why a
-      // sliding window, not a single 10s delta or an ever-growing baseline.
-      const now = Date.now();
-      const samples = poolShareSamplesRef.current;
-      const last = samples[samples.length - 1];
-      if (last && totalShares < last.shares) {
-        // A round was just won -- currentRoundTotalShares reset to 0.
-        // Every older sample now refers to a share count from before the
-        // reset and would read as a huge negative rate against it, so
-        // start the window over rather than showing garbage.
-        poolShareSamplesRef.current = [{ t: now, shares: totalShares }];
-        setPoolHashrate(null);
-      } else {
-        samples.push({ t: now, shares: totalShares });
-        // Drop samples older than the window, but always keep at least one
-        // -- the oldest sample still within the window is the left edge
-        // the rate below is measured from.
-        while (samples.length > 1 && now - samples[0].t > POOL_HASHRATE_WINDOW_MS) {
-          samples.shift();
-        }
-        const oldest = samples[0];
-        const deltaSeconds = (now - oldest.t) / 1000;
-        if (deltaSeconds > 0) {
-          const shareBits = Number(shareBitsStr);
-          setPoolHashrate(((totalShares - oldest.shares) / deltaSeconds) * Math.pow(2, shareBits));
-        } else {
-          setPoolHashrate(null); // only one sample so far -- not enough data yet
-        }
-      }
+      setPoolRoundTotalShares(Number(totalSharesStr));
+      setPoolActiveMiners(Number(activeMinersStr));
     } catch (err) {
       console.error("Failed to refresh pool status", err);
     }
@@ -765,9 +713,9 @@ function App() {
                     <div className="stat-value">{poolShares !== null ? formatCount(poolShares) : "..."}</div>
                   </div>
                   <div className="stat-tile">
-                    <div className="stat-label">Pool hashrate</div>
+                    <div className="stat-label">Active miners</div>
                     <div className="stat-value">
-                      {poolHashrate !== null ? formatHashrate(poolHashrate) : "estimating..."}
+                      {poolActiveMiners !== null ? formatCount(poolActiveMiners) : "..."}
                       {poolShares !== null && poolRoundTotalShares !== null && poolRoundTotalShares > 0 && (
                         <span className="stat-value-suffix"> ({((poolShares / poolRoundTotalShares) * 100).toFixed(1)}% ours)</span>
                       )}
@@ -806,8 +754,8 @@ function App() {
                 <div className="stat-label">Blocks won this session</div>
                 <div className="stat-value">{sessionBlocks}</div>
               </div>
-              <div className="stat-tile">
-                <div className="stat-label">Blocks won in total</div>
+              <div className="stat-tile" title="From mother's own lifetime leaderboard, which only counts blocks submitted under your own principal -- a pool win is submitted by PikoPool's principal instead, so it's never included here even though you still get paid your share.">
+                <div className="stat-label">Blocks won solo (lifetime)</div>
                 <div className="stat-value">{totalBlocks !== null ? formatCount(totalBlocks) : "..."}</div>
               </div>
             </div>

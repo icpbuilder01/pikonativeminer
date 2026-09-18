@@ -73,6 +73,7 @@ pub struct PoolStats {
     pub totalSharesAllTime: Nat,
     pub totalPikoDistributed: Nat,
     pub currentRoundTotalShares: Nat,
+    pub activeMinersThisRound: Nat,
 }
 
 #[derive(CandidType, Deserialize, Debug, Clone)]

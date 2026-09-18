@@ -349,20 +349,20 @@ async fn get_my_pool_share(state: State<'_, AppState>) -> Result<(String, String
     Ok((nat_to_plain_string(&share.sharesThisRound), nat_to_plain_string(&share.pendingReward)))
 }
 
-/// (currentRoundTotalShares, shareDifficultyBits) -- everything the
-/// frontend needs to turn its own share-count polling into an estimated
-/// pool-wide hashrate (shares arrive at a Poisson rate proportional to
-/// hashrate at a fixed difficulty, the same principle real mining pools
-/// use) and a "my % of the pool" figure, without a separate round trip
-/// for each of the two canister queries this draws from.
+/// (currentRoundTotalShares, activeMinersThisRound) -- for a "my % of the
+/// pool" figure and a steady active-miner count. A hashrate figure derived
+/// from share-arrival timing was tried first and dropped: it's a Poisson
+/// process, so at a low real share rate (a lone or small pool) it stays
+/// noisy no matter how it's averaged -- confirmed live reading anywhere
+/// from half to several times the real hashrate depending on the window.
+/// Distinct-participant count is exact and a more useful figure anyway.
 #[tauri::command]
 async fn get_pool_stats(state: State<'_, AppState>) -> Result<(String, String), String> {
-    let (stats, config) = tokio::try_join!(
-        agent::get_pool_stats(&state.agent),
-        agent::get_pool_config(&state.agent)
-    )
-    .map_err(|e| e.to_string())?;
-    Ok((nat_to_plain_string(&stats.currentRoundTotalShares), nat_to_plain_string(&config.shareDifficultyBits)))
+    let stats = agent::get_pool_stats(&state.agent).await.map_err(|e| e.to_string())?;
+    Ok((
+        nat_to_plain_string(&stats.currentRoundTotalShares),
+        nat_to_plain_string(&stats.activeMinersThisRound),
+    ))
 }
 
 #[tauri::command]
