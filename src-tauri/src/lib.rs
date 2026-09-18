@@ -209,6 +209,7 @@ async fn start_mining(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     *running = true;
     drop(running);
 
+    let owner = Principal::from_text(&state.principal_text).map_err(|e| e.to_string())?;
     state.mining_stop.store(false, Ordering::Relaxed);
     let stop_flag = Arc::clone(&state.mining_stop);
     let agent = Arc::clone(&state.agent);
@@ -217,7 +218,7 @@ async fn start_mining(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     let app_handle = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        mining_supervisor(app_handle, agent, stop_flag, running_flag, power_percent).await;
+        mining_supervisor(app_handle, agent, owner, stop_flag, running_flag, power_percent).await;
     });
 
     Ok(())
@@ -241,6 +242,7 @@ fn set_power_percent(state: State<'_, AppState>, percent: u32) -> Result<(), Str
 async fn mining_supervisor(
     app: AppHandle,
     agent: Arc<Agent>,
+    owner: Principal,
     stop_flag: Arc<AtomicBool>,
     running_flag: Arc<AsyncMutex<bool>>,
     power_percent: Arc<AtomicU32>,
@@ -262,6 +264,26 @@ async fn mining_supervisor(
                 continue;
             }
         };
+
+        // Checked before spending any time searching, not just after a
+        // doomed submission -- otherwise a search that can never be paid
+        // for anyway still burns up to the full average find time (minutes,
+        // at real difficulty) before ever discovering that.
+        let cost_per_block = work.miningFeeE8s.clone() + Nat::from(ICP_LEDGER_FEE_E8S);
+        let allowance = agent::icp_allowance(&agent, owner).await.unwrap_or_else(|_| Nat::from(0u64));
+        let balance = agent::ledger_balance(&agent, agent::ICP_LEDGER_CANISTER_ID, owner)
+            .await
+            .unwrap_or_else(|_| Nat::from(0u64));
+        if allowance < cost_per_block || balance < cost_per_block {
+            stop_flag.store(true, Ordering::Relaxed);
+            emit_stopped(
+                &app,
+                session_attempts,
+                session_blocks,
+                "Mining stopped: insufficient ICP allowance/balance -- approve more ICP to keep mining.",
+            );
+            break 'outer;
+        }
 
         let mut previous_hash = [0u8; 32];
         let raw = work.previousHash.as_ref();
