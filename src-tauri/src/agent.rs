@@ -207,6 +207,20 @@ pub async fn get_my_pool_share(agent: &Agent) -> Result<MyShare> {
     Ok(share)
 }
 
+/// Liveness ping, decoupled from actual share submissions -- see
+/// pikopool's own heartbeat/ACTIVE_WINDOW_NANOS comments for why a real
+/// "mining right now" signal can't be derived from share timing alone.
+pub async fn pool_heartbeat(agent: &Agent) -> Result<()> {
+    let canister_id = Principal::from_text(POOL_CANISTER_ID)?;
+    agent
+        .update(&canister_id, "heartbeat")
+        .with_arg(Encode!()?)
+        .call_and_wait()
+        .await
+        .context("heartbeat call failed")?;
+    Ok(())
+}
+
 pub async fn claim_pool_reward(agent: &Agent) -> Result<TransferResult> {
     let canister_id = Principal::from_text(POOL_CANISTER_ID)?;
     let response = agent

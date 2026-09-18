@@ -180,6 +180,7 @@ function App() {
   const [poolPendingReward, setPoolPendingReward] = useState<string | null>(null);
   const [poolRoundTotalShares, setPoolRoundTotalShares] = useState<number | null>(null);
   const [poolActiveMiners, setPoolActiveMiners] = useState<number | null>(null);
+  const [poolActiveMinersNow, setPoolActiveMinersNow] = useState<number | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [claimStatus, setClaimStatus] = useState<string | null>(null);
 
@@ -241,16 +242,17 @@ function App() {
 
   const refreshPoolStatus = useCallback(async () => {
     try {
-      const [allow, [sharesStr, pendingReward], [totalSharesStr, activeMinersStr]] = await Promise.all([
+      const [allow, [sharesStr, pendingReward], [totalSharesStr, activeMinersStr, activeMinersNowStr]] = await Promise.all([
         invoke<string>("get_pool_icp_allowance"),
         invoke<[string, string]>("get_my_pool_share"),
-        invoke<[string, string]>("get_pool_stats"),
+        invoke<[string, string, string]>("get_pool_stats"),
       ]);
       setPoolAllowance(allow);
       setPoolShares(Number(sharesStr));
       setPoolPendingReward(pendingReward);
       setPoolRoundTotalShares(Number(totalSharesStr));
       setPoolActiveMiners(Number(activeMinersStr));
+      setPoolActiveMinersNow(Number(activeMinersNowStr));
     } catch (err) {
       console.error("Failed to refresh pool status", err);
     }
@@ -712,14 +714,18 @@ function App() {
                     <div className="stat-label">Shares this round</div>
                     <div className="stat-value">{poolShares !== null ? formatCount(poolShares) : "..."}</div>
                   </div>
-                  <div className="stat-tile">
-                    <div className="stat-label">Active miners</div>
+                  <div className="stat-tile" title="Distinct wallets credited a share since the pool's last win -- includes anyone who mined earlier this round and then stopped, not just who's mining this instant.">
+                    <div className="stat-label">Active miners (this round)</div>
                     <div className="stat-value">
                       {poolActiveMiners !== null ? formatCount(poolActiveMiners) : "..."}
                       {poolShares !== null && poolRoundTotalShares !== null && poolRoundTotalShares > 0 && (
                         <span className="stat-value-suffix"> ({((poolShares / poolRoundTotalShares) * 100).toFixed(1)}% ours)</span>
                       )}
                     </div>
+                  </div>
+                  <div className="stat-tile" title="Distinct wallets that have pinged the pool in the last ~60 seconds -- who's actually mining right now, not just who has contributed since the last win.">
+                    <div className="stat-label">Mining right now</div>
+                    <div className="stat-value">{poolActiveMinersNow !== null ? formatCount(poolActiveMinersNow) : "..."}</div>
                   </div>
                   <div className="stat-tile">
                     <div className="stat-label">Pending pool reward</div>
