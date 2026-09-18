@@ -57,6 +57,7 @@ struct MiningProgress {
     message: String,
     #[serde(rename = "messageKind")]
     message_kind: String, // "good" | "critical" | ""
+    stopped: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -313,6 +314,27 @@ async fn mining_supervisor(
                             );
                         }
                         Ok(types::SubmitResult::Err(err)) => {
+                            // Insufficient allowance/balance can never resolve itself by
+                            // retrying -- every future proof would hit the exact same
+                            // wall, so looping here would just burn CPU forever instead
+                            // of actually mining anything submittable.
+                            let insufficient = matches!(
+                                err,
+                                types::SubmitError::IcpFeeFailed(
+                                    types::TransferFromError::InsufficientAllowance { .. }
+                                        | types::TransferFromError::InsufficientFunds { .. }
+                                )
+                            );
+                            if insufficient {
+                                stop_flag.store(true, Ordering::Relaxed);
+                                emit_stopped(
+                                    &app,
+                                    session_attempts,
+                                    session_blocks,
+                                    "Mining stopped: insufficient ICP allowance/balance -- approve more ICP to keep mining.",
+                                );
+                                break 'outer;
+                            }
                             emit_progress(
                                 &app,
                                 0,
@@ -386,6 +408,26 @@ fn emit_progress(app: &AppHandle, hashrate: u64, session_attempts: u64, session_
             session_blocks,
             message: message.to_string(),
             message_kind: kind.to_string(),
+            stopped: false,
+        },
+    );
+}
+
+// Distinct from emit_progress's `stopped: false` -- lets the frontend tell
+// "still mining, just noisy" apart from "the backend loop has actually
+// exited," so it can flip its own Start/Stop button state back instead of
+// showing "mining" (and burning CPU hashing for blocks that can never be
+// submitted) forever after a permanent failure like exhausted allowance.
+fn emit_stopped(app: &AppHandle, session_attempts: u64, session_blocks: u64, message: &str) {
+    let _ = app.emit(
+        "mining-progress",
+        MiningProgress {
+            hashrate: 0,
+            session_attempts,
+            session_blocks,
+            message: message.to_string(),
+            message_kind: "critical".to_string(),
+            stopped: true,
         },
     );
 }
