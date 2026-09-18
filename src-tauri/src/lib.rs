@@ -1,4 +1,5 @@
 mod agent;
+mod gpu;
 mod identity;
 mod miner;
 mod types;
@@ -6,7 +7,7 @@ mod types;
 use candid::{Nat, Principal};
 use ic_agent::Agent;
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -45,6 +46,10 @@ struct AppState {
     mining_stop: Arc<AtomicBool>,
     mining_running: Arc<AsyncMutex<bool>>,
     power_percent: Arc<AtomicU32>,
+    // Probed once at startup (see gpu::probe) -- cheap, but no reason to
+    // redo the adapter enumeration on every single UI query.
+    gpu_adapter_name: Option<String>,
+    gpu_enabled: Arc<AtomicBool>,
 }
 
 #[derive(Serialize, Clone)]
@@ -227,10 +232,11 @@ async fn start_mining(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     let agent = Arc::clone(&state.agent);
     let running_flag = Arc::clone(&state.mining_running);
     let power_percent = Arc::clone(&state.power_percent);
+    let gpu_enabled = Arc::clone(&state.gpu_enabled);
     let app_handle = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        mining_supervisor(app_handle, agent, owner, stop_flag, running_flag, power_percent).await;
+        mining_supervisor(app_handle, agent, owner, stop_flag, running_flag, power_percent, gpu_enabled).await;
     });
 
     Ok(())
@@ -251,6 +257,30 @@ fn set_power_percent(state: State<'_, AppState>, percent: u32) -> Result<(), Str
     Ok(())
 }
 
+/// Name of the GPU adapter this machine could mine with, or null if none
+/// was found at startup -- the frontend uses this to decide whether to
+/// show the GPU toggle at all, rather than offering a setting that can
+/// never do anything on e.g. a VM with no GPU passthrough.
+#[tauri::command]
+fn gpu_adapter_name(state: State<'_, AppState>) -> Option<String> {
+    state.gpu_adapter_name.clone()
+}
+
+#[tauri::command]
+fn get_gpu_enabled(state: State<'_, AppState>) -> bool {
+    state.gpu_enabled.load(Ordering::Relaxed)
+}
+
+/// Picked up on the next job restart by an already-running mining_supervisor
+/// (checked once per job, same cadence as everything else that can only
+/// meaningfully change between jobs -- num_threads, the header bytes, etc.),
+/// not applied to an in-flight GPU search immediately.
+#[tauri::command]
+fn set_gpu_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    state.gpu_enabled.store(enabled, Ordering::Relaxed);
+    Ok(())
+}
+
 async fn mining_supervisor(
     app: AppHandle,
     agent: Arc<Agent>,
@@ -258,6 +288,7 @@ async fn mining_supervisor(
     stop_flag: Arc<AtomicBool>,
     running_flag: Arc<AsyncMutex<bool>>,
     power_percent: Arc<AtomicU32>,
+    gpu_enabled: Arc<AtomicBool>,
 ) {
     let num_threads = num_cpus::get();
     let mut session_attempts: u64 = 0;
@@ -314,7 +345,38 @@ async fn mining_supervisor(
             height,
             difficulty_bits,
         };
-        let (handle, rx) = miner::start_mining(job, num_threads, Arc::clone(&power_percent));
+
+        // CPU and (optionally) GPU search the same job concurrently,
+        // sharing one stop flag, one hash-attempt counter, and one winner
+        // channel -- the supervisor below doesn't need to know or care
+        // which backend actually found the winning nonce.
+        let job_stop_flag = Arc::new(AtomicBool::new(false));
+        let job_hash_count = Arc::new(AtomicU64::new(0));
+        let (tx, rx) = std::sync::mpsc::channel::<u64>();
+        let mut handle = miner::MiningHandle::new(Arc::clone(&job_stop_flag), Arc::clone(&job_hash_count));
+
+        let cpu_threads = miner::start_mining(
+            job,
+            num_threads,
+            Arc::clone(&power_percent),
+            Arc::clone(&job_stop_flag),
+            Arc::clone(&job_hash_count),
+            tx.clone(),
+        );
+        handle.add_threads(cpu_threads);
+
+        if gpu_enabled.load(Ordering::Relaxed) {
+            if let Some(gpu_thread) = gpu::start_gpu_mining(
+                job,
+                Arc::clone(&power_percent),
+                Arc::clone(&job_stop_flag),
+                Arc::clone(&job_hash_count),
+                tx.clone(),
+            ) {
+                handle.add_threads(vec![gpu_thread]);
+            }
+        }
+        drop(tx); // supervisor only reads rx; drop this end so the channel closes once every search thread's own clone is gone
 
         let mut last_report = std::time::Instant::now();
         let mut last_hash_count: u64 = 0;
@@ -495,6 +557,16 @@ pub fn run() {
             let principal = ic_agent::Identity::sender(&identity).expect("identity has no principal");
             let principal_text = principal.to_text();
             let agent = agent::build_agent(identity).expect("failed to build IC agent");
+            // One-off adapter enumeration at startup -- cheap (no device is
+            // created here, just queried), so doing it synchronously before
+            // the window even shows is simpler than plumbing an async probe
+            // through the frontend's first render.
+            let gpu_adapter_name = gpu::probe();
+            if let Some(name) = &gpu_adapter_name {
+                println!("GPU mining available: {name}");
+            } else {
+                println!("GPU mining unavailable: no usable adapter found");
+            }
 
             app.manage(AppState {
                 agent: Arc::new(agent),
@@ -502,6 +574,8 @@ pub fn run() {
                 mining_stop: Arc::new(AtomicBool::new(false)),
                 mining_running: Arc::new(AsyncMutex::new(false)),
                 power_percent: Arc::new(AtomicU32::new(100)),
+                gpu_adapter_name,
+                gpu_enabled: Arc::new(AtomicBool::new(false)),
             });
 
             // System tray -- lets mining keep running in the background when
@@ -557,6 +631,9 @@ pub fn run() {
             start_mining,
             stop_mining,
             set_power_percent,
+            gpu_adapter_name,
+            get_gpu_enabled,
+            set_gpu_enabled,
             quit_app
         ])
         .run(tauri::generate_context!())

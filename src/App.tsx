@@ -168,6 +168,8 @@ function App() {
   const [difficultyHistory, setDifficultyHistory] = useState<DifficultyPoint[]>([]);
   const [autostart, setAutostartState] = useState<boolean | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [gpuAdapterName, setGpuAdapterName] = useState<string | null>(null);
+  const [gpuEnabled, setGpuEnabled] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -196,10 +198,22 @@ function App() {
   useEffect(() => {
     invoke<string>("get_principal").then(setPrincipal);
     invoke<boolean>("get_autostart").then(setAutostartState).catch(() => {});
+    invoke<string | null>("gpu_adapter_name").then(setGpuAdapterName).catch(() => {});
+    invoke<boolean>("get_gpu_enabled").then(setGpuEnabled).catch(() => {});
     refreshBalances();
     const interval = setInterval(refreshBalances, 10000);
     return () => clearInterval(interval);
   }, [refreshBalances]);
+
+  async function handleToggleGpu() {
+    const next = !gpuEnabled;
+    try {
+      await invoke("set_gpu_enabled", { enabled: next });
+      setGpuEnabled(next);
+    } catch (err) {
+      console.error("Failed to toggle GPU mining", err);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -541,6 +555,17 @@ function App() {
                 {power === "max" ? "full CPU speed" : power === "high" ? "~75% CPU, cooler" : "~32% CPU, coolest"}
               </span>
             </div>
+
+            {gpuAdapterName && (
+              <div className="power-row">
+                <span className="power-label">GPU mining:</span>
+                <label className="gpu-toggle">
+                  <input type="checkbox" checked={gpuEnabled} onChange={handleToggleGpu} />
+                  Use {gpuAdapterName}
+                </label>
+                <span className="power-hint">alongside CPU threads, takes effect on next start</span>
+              </div>
+            )}
 
             <div className="stat-grid">
               <div className="stat-tile">
