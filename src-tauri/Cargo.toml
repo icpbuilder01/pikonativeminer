@@ -1,6 +1,6 @@
 [package]
 name = "pikonativeminer"
-version = "0.1.1"
+version = "0.1.2"
 description = "A Tauri App"
 authors = ["you"]
 license = "MIT"
@@ -34,6 +34,7 @@ num_cpus = "1"
 anyhow = "1"
 serde_bytes = "0.11"
 tauri-plugin-autostart = "2.5.1"
+tauri-plugin-single-instance = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

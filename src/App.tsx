@@ -397,8 +397,15 @@ function App() {
             <div className="stat-grid">
               <div className="stat-tile">
                 <div className="stat-label">Block reward</div>
-                <div className="stat-value">
-                  {networkStats ? `${formatAmount(networkStats.currentReward)} PIKO` : "..."}
+                <div className="stat-value stat-value-row">
+                  {networkStats ? (
+                    <>
+                      {formatAmount(networkStats.currentReward)}
+                      <img src="/piko-logo.svg" alt="PIKO" className="token-icon" />
+                    </>
+                  ) : (
+                    "..."
+                  )}
                 </div>
               </div>
               <div className="stat-tile">
