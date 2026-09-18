@@ -170,6 +170,7 @@ function App() {
   const [now, setNow] = useState(() => Date.now());
   const [gpuAdapterName, setGpuAdapterName] = useState<string | null>(null);
   const [gpuEnabled, setGpuEnabled] = useState(false);
+  const [gpuError, setGpuError] = useState<string | null>(null);
 
   const [poolEnabled, setPoolEnabled] = useState(false);
   const [poolAllowance, setPoolAllowance] = useState<string | null>(null);
@@ -226,6 +227,7 @@ function App() {
     try {
       await invoke("set_gpu_enabled", { enabled: next });
       setGpuEnabled(next);
+      if (!next) setGpuError(null);
     } catch (err) {
       console.error("Failed to toggle GPU mining", err);
     }
@@ -387,11 +389,18 @@ function App() {
         setHashrate(0);
         refreshBalances();
       }
+      // Cheap query, and the only way to notice a GPU search that was
+      // enabled but failed to actually start (adapter/device request
+      // failed at runtime) -- otherwise that failure is invisible, the
+      // hashrate just silently matches CPU-only with no indication why.
+      if (gpuEnabled) {
+        invoke<string | null>("gpu_error").then(setGpuError).catch(() => {});
+      }
     });
     return () => {
       unlisten.then((f) => f());
     };
-  }, [refreshBalances]);
+  }, [refreshBalances, gpuEnabled]);
 
   async function handleCopyPrincipal() {
     if (!principal) return;
@@ -657,14 +666,27 @@ function App() {
               </span>
             </div>
 
-            {gpuAdapterName && (
+            <div className="power-row">
+              <span className="power-label">GPU mining:</span>
+              {gpuAdapterName ? (
+                <>
+                  <label className="gpu-toggle">
+                    <input type="checkbox" checked={gpuEnabled} onChange={handleToggleGpu} />
+                    Use {gpuAdapterName}
+                  </label>
+                  <span className="power-hint">alongside CPU threads, takes effect on next start</span>
+                </>
+              ) : (
+                <span className="power-hint">
+                  No compatible GPU detected -- mining will use CPU only. Make sure your graphics driver is
+                  up to date (on Linux, an NVIDIA card needs the proprietary driver, not nouveau).
+                </span>
+              )}
+            </div>
+            {gpuEnabled && gpuError && (
               <div className="power-row">
-                <span className="power-label">GPU mining:</span>
-                <label className="gpu-toggle">
-                  <input type="checkbox" checked={gpuEnabled} onChange={handleToggleGpu} />
-                  Use {gpuAdapterName}
-                </label>
-                <span className="power-hint">alongside CPU threads, takes effect on next start</span>
+                <span className="power-label" />
+                <span className="mining-message critical">GPU mining failed to start: {gpuError} -- continuing on CPU only.</span>
               </div>
             )}
 
