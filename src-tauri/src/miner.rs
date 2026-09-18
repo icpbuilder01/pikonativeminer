@@ -19,6 +19,11 @@ pub struct MiningJob {
     pub previous_hash: [u8; 32],
     pub height: u64,
     pub difficulty_bits: u32,
+    // Some(bits) when pool mode is on -- a lower, easier threshold that
+    // gets reported (via a separate channel, see start_mining) without
+    // stopping the search, so the pool can credit partial work between the
+    // rare full-difficulty finds. None when mining solo.
+    pub share_difficulty_bits: Option<u32>,
 }
 
 // Owns every search thread for a job -- CPU threads always, plus the GPU
@@ -93,6 +98,10 @@ pub fn start_mining(
     stop_flag: Arc<AtomicBool>,
     hash_count: Arc<AtomicU64>,
     tx: std::sync::mpsc::Sender<u64>,
+    // Present only in pool mode -- see MiningJob::share_difficulty_bits.
+    // A share found here doesn't stop the search; the supervisor forwards
+    // it to pikopool instead of mother, on its own async task.
+    share_tx: Option<std::sync::mpsc::Sender<u64>>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut header = [0u8; 40];
     header[..32].copy_from_slice(&job.previous_hash);
@@ -110,6 +119,7 @@ pub fn start_mining(
     let nonce_offset = u64::from_be_bytes(offset_bytes) & 0x00ff_ffff_ffff_ffff;
 
     let difficulty_bits = job.difficulty_bits;
+    let share_difficulty_bits = job.share_difficulty_bits;
     let mut threads = Vec::with_capacity(num_threads);
 
     for worker_index in 0..num_threads {
@@ -117,6 +127,7 @@ pub fn start_mining(
         let hash_count = Arc::clone(&hash_count);
         let power_percent = Arc::clone(&power_percent);
         let tx = tx.clone();
+        let share_tx = share_tx.clone();
         let header = header;
         let stride = num_threads as u64;
         let start_nonce = nonce_offset.wrapping_add(worker_index as u64);
@@ -144,12 +155,19 @@ pub fn start_mining(
 
                 let digest = Sha256::digest(data);
                 local_attempts += 1;
+                let zero_bits = leading_zero_bits(&digest);
 
-                if leading_zero_bits(&digest) >= difficulty_bits {
+                if zero_bits >= difficulty_bits {
                     hash_count.fetch_add(local_attempts, Ordering::Relaxed);
                     stop_flag.store(true, Ordering::Relaxed);
                     let _ = tx.send(nonce);
                     return;
+                } else if let Some(share_bits) = share_difficulty_bits {
+                    if zero_bits >= share_bits {
+                        if let Some(share_tx) = &share_tx {
+                            let _ = share_tx.send(nonce);
+                        }
+                    }
                 }
 
                 nonce = nonce.wrapping_add(stride);
@@ -177,4 +195,55 @@ pub fn start_mining(
     }
 
     threads
+}
+
+// TEMP-BENCH: re-measures real CPU throughput with the current shipped
+// dual-threshold code (solo vs. pool-mode share checking enabled), to
+// confirm the pool-mode branch added to the hot loop hasn't regressed the
+// numbers benchmarked before pool mode existed. Remove after reading the
+// output -- not meant to ship.
+#[cfg(test)]
+mod temp_bench {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn cpu_hashrate() {
+        let num_threads = num_cpus::get();
+        for share_bits in [None, Some(20u32)] {
+            let job = MiningJob {
+                previous_hash: [0x11; 32],
+                height: 999_999,
+                difficulty_bits: 64, // unreachable within the benchmark window -- never stops the search
+                share_difficulty_bits: share_bits,
+            };
+            let stop_flag = Arc::new(AtomicBool::new(false));
+            let hash_count = Arc::new(AtomicU64::new(0));
+            let power_percent = Arc::new(AtomicU32::new(100));
+            let (tx, _rx) = std::sync::mpsc::channel();
+            let (share_tx, _share_rx) = std::sync::mpsc::channel();
+            let threads = start_mining(
+                job,
+                num_threads,
+                power_percent,
+                Arc::clone(&stop_flag),
+                Arc::clone(&hash_count),
+                tx,
+                share_bits.map(|_| share_tx),
+            );
+            let start = Instant::now();
+            thread::sleep(Duration::from_secs(3));
+            let elapsed = start.elapsed();
+            stop_flag.store(true, Ordering::Relaxed);
+            for t in threads {
+                let _ = t.join();
+            }
+            let count = hash_count.load(Ordering::Relaxed);
+            let rate = count as f64 / elapsed.as_secs_f64();
+            eprintln!(
+                "CPU: threads={num_threads} share_difficulty_bits={share_bits:?} hashrate={:.1} MH/s (count={count}, elapsed={elapsed:?})",
+                rate / 1e6
+            );
+        }
+    }
 }

@@ -52,6 +52,51 @@ pub struct Work {
     pub reward: Nat,
 }
 
+// --- pikopool (mining pool) ---
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct PoolConfig {
+    pub shareDifficultyBits: Nat,
+    pub networkDifficultyBits: Nat,
+    pub height: Nat,
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct MyShare {
+    pub sharesThisRound: Nat,
+    pub pendingReward: Nat,
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct PoolStats {
+    pub blocksWon: Nat,
+    pub totalSharesAllTime: Nat,
+    pub totalPikoDistributed: Nat,
+    pub currentRoundTotalShares: Nat,
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct ShareOutcome {
+    pub accepted: bool,
+    pub isBlockWinner: bool,
+    pub poolSubmitResult: Option<SubmitResult>,
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub enum ShareError {
+    Anonymous,
+    BelowShareTarget,
+    DuplicateNonce,
+    StaleWork,
+    TooSoon(TooSoonInfo),
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub enum ShareResult {
+    Ok(ShareOutcome),
+    Err(ShareError),
+}
+
 #[derive(CandidType, Deserialize, Debug, Clone)]
 pub struct SubmitOk {
     pub hash: ByteBuf,

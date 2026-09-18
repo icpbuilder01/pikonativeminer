@@ -50,6 +50,7 @@ struct AppState {
     // redo the adapter enumeration on every single UI query.
     gpu_adapter_name: Option<String>,
     gpu_enabled: Arc<AtomicBool>,
+    pool_enabled: Arc<AtomicBool>,
 }
 
 #[derive(Serialize, Clone)]
@@ -218,6 +219,31 @@ async fn approve_icp(state: State<'_, AppState>, blocks: u32) -> Result<String, 
 }
 
 #[tauri::command]
+async fn get_pool_icp_allowance(state: State<'_, AppState>) -> Result<String, String> {
+    let owner = Principal::from_text(&state.principal_text).map_err(|e| e.to_string())?;
+    agent::icp_allowance_for_pool(&state.agent, owner)
+        .await
+        .map(|n| nat_to_plain_string(&n))
+        .map_err(|e| e.to_string())
+}
+
+/// Approves enough ICP for pikopool to collect this miner's proportional
+/// fee share across `blocks` future pool wins -- worst case per win is the
+/// FULL mining fee (if this miner were the round's only contributor), so
+/// that's the conservative per-block unit used here, same as solo mining's
+/// own approve_icp.
+#[tauri::command]
+async fn approve_icp_for_pool(state: State<'_, AppState>, blocks: u32) -> Result<String, String> {
+    let work = agent::get_work(&state.agent).await.map_err(|e| e.to_string())?;
+    let per_block = work.miningFeeE8s + Nat::from(ICP_LEDGER_FEE_E8S);
+    let amount = per_block * Nat::from(blocks.max(1));
+    agent::approve_icp_for_pool(&state.agent, amount)
+        .await
+        .map(|n| nat_to_plain_string(&n))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn start_mining(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let mut running = state.mining_running.lock().await;
     if *running {
@@ -233,10 +259,11 @@ async fn start_mining(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     let running_flag = Arc::clone(&state.mining_running);
     let power_percent = Arc::clone(&state.power_percent);
     let gpu_enabled = Arc::clone(&state.gpu_enabled);
+    let pool_enabled = Arc::clone(&state.pool_enabled);
     let app_handle = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        mining_supervisor(app_handle, agent, owner, stop_flag, running_flag, power_percent, gpu_enabled).await;
+        mining_supervisor(app_handle, agent, owner, stop_flag, running_flag, power_percent, gpu_enabled, pool_enabled).await;
     });
 
     Ok(())
@@ -281,6 +308,53 @@ fn set_gpu_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), Stri
     Ok(())
 }
 
+#[tauri::command]
+fn get_pool_enabled(state: State<'_, AppState>) -> bool {
+    state.pool_enabled.load(Ordering::Relaxed)
+}
+
+/// Same "picked up on next job restart" cadence as set_gpu_enabled. When on,
+/// every qualifying nonce (share or full solution alike) goes to pikopool's
+/// submitShare instead of straight to mother -- see mining_supervisor.
+#[tauri::command]
+fn set_pool_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    state.pool_enabled.store(enabled, Ordering::Relaxed);
+    Ok(())
+}
+
+/// This miner's current pool standing (shares credited this round, PIKO
+/// pending claim) -- polled independently by the frontend while pool mode
+/// is on, decoupled from the mining loop's own share-submission bookkeeping.
+#[tauri::command]
+async fn get_my_pool_share(state: State<'_, AppState>) -> Result<(String, String), String> {
+    let share = agent::get_my_pool_share(&state.agent).await.map_err(|e| e.to_string())?;
+    Ok((nat_to_plain_string(&share.sharesThisRound), nat_to_plain_string(&share.pendingReward)))
+}
+
+/// (currentRoundTotalShares, shareDifficultyBits) -- everything the
+/// frontend needs to turn its own share-count polling into an estimated
+/// pool-wide hashrate (shares arrive at a Poisson rate proportional to
+/// hashrate at a fixed difficulty, the same principle real mining pools
+/// use) and a "my % of the pool" figure, without a separate round trip
+/// for each of the two canister queries this draws from.
+#[tauri::command]
+async fn get_pool_stats(state: State<'_, AppState>) -> Result<(String, String), String> {
+    let (stats, config) = tokio::try_join!(
+        agent::get_pool_stats(&state.agent),
+        agent::get_pool_config(&state.agent)
+    )
+    .map_err(|e| e.to_string())?;
+    Ok((nat_to_plain_string(&stats.currentRoundTotalShares), nat_to_plain_string(&config.shareDifficultyBits)))
+}
+
+#[tauri::command]
+async fn claim_pool_reward(state: State<'_, AppState>) -> Result<String, String> {
+    match agent::claim_pool_reward(&state.agent).await.map_err(|e| e.to_string())? {
+        types::TransferResult::Ok(idx) => Ok(nat_to_plain_string(&idx)),
+        types::TransferResult::Err(e) => Err(format!("{e:?}")),
+    }
+}
+
 async fn mining_supervisor(
     app: AppHandle,
     agent: Arc<Agent>,
@@ -289,6 +363,7 @@ async fn mining_supervisor(
     running_flag: Arc<AsyncMutex<bool>>,
     power_percent: Arc<AtomicU32>,
     gpu_enabled: Arc<AtomicBool>,
+    pool_enabled: Arc<AtomicBool>,
 ) {
     let num_threads = num_cpus::get();
     let mut session_attempts: u64 = 0;
@@ -308,23 +383,52 @@ async fn mining_supervisor(
             }
         };
 
+        // Pool mode's share target comes from pikopool itself, not mother
+        // -- re-fetched every job restart alongside everything else that
+        // can only meaningfully change between jobs. A fetch failure just
+        // falls back to solo mode for this one job (still correct, just
+        // not pooled) rather than blocking mining entirely. Determined
+        // before the allowance/balance gate below, since which spender's
+        // allowance is the right one to check depends on it.
+        let pool_mode_requested = pool_enabled.load(Ordering::Relaxed);
+        let share_difficulty_bits: Option<u32> = if pool_mode_requested {
+            match agent::get_pool_config(&agent).await {
+                Ok(cfg) => cfg.shareDifficultyBits.0.try_into().ok(),
+                Err(e) => {
+                    emit_progress(&app, 0, session_attempts, session_blocks, &format!("Pool config unavailable ({e}) -- mining solo this round"), "");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let pool_mode = pool_mode_requested && share_difficulty_bits.is_some();
+
         // Checked before spending any time searching, not just after a
         // doomed submission -- otherwise a search that can never be paid
         // for anyway still burns up to the full average find time (minutes,
-        // at real difficulty) before ever discovering that.
+        // at real difficulty) before ever discovering that. In pool mode,
+        // participants approve pikopool as the spender instead of mother
+        // (see approve_icp_for_pool) -- checking mother's own allowance
+        // here would wrongly halt a miner who only ever approved the pool.
         let cost_per_block = work.miningFeeE8s.clone() + Nat::from(ICP_LEDGER_FEE_E8S);
-        let allowance = agent::icp_allowance(&agent, owner).await.unwrap_or_else(|_| Nat::from(0u64));
+        let allowance = if pool_mode {
+            agent::icp_allowance_for_pool(&agent, owner).await
+        } else {
+            agent::icp_allowance(&agent, owner).await
+        }
+        .unwrap_or_else(|_| Nat::from(0u64));
         let balance = agent::ledger_balance(&agent, agent::ICP_LEDGER_CANISTER_ID, owner)
             .await
             .unwrap_or_else(|_| Nat::from(0u64));
         if allowance < cost_per_block || balance < cost_per_block {
             stop_flag.store(true, Ordering::Relaxed);
-            emit_stopped(
-                &app,
-                session_attempts,
-                session_blocks,
-                "Mining stopped: insufficient ICP allowance/balance -- approve more ICP to keep mining.",
-            );
+            let msg = if pool_mode {
+                "Mining stopped: insufficient ICP allowance/balance for the pool -- approve more ICP to keep mining."
+            } else {
+                "Mining stopped: insufficient ICP allowance/balance -- approve more ICP to keep mining."
+            };
+            emit_stopped(&app, session_attempts, session_blocks, msg);
             break 'outer;
         }
 
@@ -344,15 +448,25 @@ async fn mining_supervisor(
             previous_hash,
             height,
             difficulty_bits,
+            share_difficulty_bits,
         };
 
         // CPU and (optionally) GPU search the same job concurrently,
         // sharing one stop flag, one hash-attempt counter, and one winner
         // channel -- the supervisor below doesn't need to know or care
-        // which backend actually found the winning nonce.
+        // which backend actually found the winning nonce. A second,
+        // separate channel carries pool-mode shares (below-full-difficulty
+        // finds) without ever touching the stop flag -- see miner.rs/gpu.rs.
         let job_stop_flag = Arc::new(AtomicBool::new(false));
         let job_hash_count = Arc::new(AtomicU64::new(0));
         let (tx, rx) = std::sync::mpsc::channel::<u64>();
+        let (share_tx, share_rx): (Option<std::sync::mpsc::Sender<u64>>, Option<std::sync::mpsc::Receiver<u64>>) =
+            if pool_mode {
+                let (s_tx, s_rx) = std::sync::mpsc::channel::<u64>();
+                (Some(s_tx), Some(s_rx))
+            } else {
+                (None, None)
+            };
         let mut handle = miner::MiningHandle::new(Arc::clone(&job_stop_flag), Arc::clone(&job_hash_count));
 
         let cpu_threads = miner::start_mining(
@@ -362,6 +476,7 @@ async fn mining_supervisor(
             Arc::clone(&job_stop_flag),
             Arc::clone(&job_hash_count),
             tx.clone(),
+            share_tx.clone(),
         );
         handle.add_threads(cpu_threads);
 
@@ -372,15 +487,23 @@ async fn mining_supervisor(
                 Arc::clone(&job_stop_flag),
                 Arc::clone(&job_hash_count),
                 tx.clone(),
+                share_tx.clone(),
             ) {
                 handle.add_threads(vec![gpu_thread]);
             }
         }
         drop(tx); // supervisor only reads rx; drop this end so the channel closes once every search thread's own clone is gone
+        drop(share_tx);
 
         let mut last_report = std::time::Instant::now();
         let mut last_hash_count: u64 = 0;
         let mut last_stale_check = std::time::Instant::now();
+        // Shares can arrive far faster than pikopool's own 0.3s per-caller
+        // rate limit allows -- submitting every single one would mostly
+        // just burn round-trips on TooSoon for nothing, so only the most
+        // recent pending share is kept and sent at most this often.
+        let mut last_share_sent = std::time::Instant::now() - Duration::from_secs(1);
+        const MIN_SHARE_SUBMIT_INTERVAL: Duration = Duration::from_millis(350);
 
         loop {
             if stop_flag.load(Ordering::Relaxed) {
@@ -394,6 +517,55 @@ async fn mining_supervisor(
                     // flag before sending, so the others are already
                     // winding down -- this just joins them.
                     handle.stop();
+
+                    if pool_mode {
+                        // Solo-submitting straight to mother here would let
+                        // this one lucky thread keep 100% of the reward
+                        // instead of sharing it -- pool mode always routes
+                        // through submitShare, which forwards to mother
+                        // itself on this canister's behalf when it's
+                        // actually a winner.
+                        match agent::submit_share(&agent, target_height, nonce).await {
+                            Ok(types::ShareResult::Ok(outcome)) => {
+                                if outcome.isBlockWinner {
+                                    session_blocks += 1;
+                                    let msg = match &outcome.poolSubmitResult {
+                                        Some(types::SubmitResult::Ok(ok)) => {
+                                            format!(
+                                                "Pool won block #{}! Reward split is credited by the pool -- claim it from there.",
+                                                nat_to_plain_string(&ok.height)
+                                            )
+                                        }
+                                        _ => "Pool found a winning share -- reward pending".to_string(),
+                                    };
+                                    emit_progress(&app, 0, session_attempts, session_blocks, &msg, "good");
+                                } else {
+                                    emit_progress(&app, 0, session_attempts, session_blocks, "Share accepted by the pool", "");
+                                }
+                            }
+                            Ok(types::ShareResult::Err(err)) => {
+                                emit_progress(
+                                    &app,
+                                    0,
+                                    session_attempts,
+                                    session_blocks,
+                                    &format!("Share not accepted: {err:?} -- still mining"),
+                                    "",
+                                );
+                            }
+                            Err(e) => {
+                                emit_progress(
+                                    &app,
+                                    0,
+                                    session_attempts,
+                                    session_blocks,
+                                    &format!("Share submission failed: {e} -- still mining"),
+                                    "",
+                                );
+                            }
+                        }
+                        continue 'outer;
+                    }
 
                     match agent::submit_proof(&agent, nonce).await {
                         Ok(types::SubmitResult::Ok(ok)) => {
@@ -462,6 +634,34 @@ async fn mining_supervisor(
 
             // Roughly every 400ms, report the real hashrate since the last report.
             let now = std::time::Instant::now();
+
+            // Pool-mode shares: drain whatever's queued, but only actually
+            // submit at most one per MIN_SHARE_SUBMIT_INTERVAL (matches
+            // pikopool's own 0.3s per-caller rate limit) -- shares can
+            // arrive far faster than that at a modest difficulty, and
+            // submitting every single one would mostly just burn
+            // round-trips on TooSoon for nothing. Fire-and-forget: these
+            // never stop the search (miner.rs/gpu.rs only send a share
+            // here when it did NOT also clear the full network target),
+            // so there's nothing for the inner loop to wait on.
+            if let Some(share_rx) = &share_rx {
+                let mut latest_share: Option<u64> = None;
+                while let Ok(nonce) = share_rx.try_recv() {
+                    latest_share = Some(nonce);
+                }
+                if let Some(nonce) = latest_share {
+                    if now.duration_since(last_share_sent) >= MIN_SHARE_SUBMIT_INTERVAL {
+                        last_share_sent = now;
+                        let agent = Arc::clone(&agent);
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = agent::submit_share(&agent, target_height, nonce).await {
+                                eprintln!("pool share submission failed: {e}");
+                            }
+                        });
+                    }
+                }
+            }
+
             if now.duration_since(last_report).as_millis() >= 400 {
                 let current = handle.hash_count.load(Ordering::Relaxed);
                 let delta = current.saturating_sub(last_hash_count);
@@ -576,6 +776,7 @@ pub fn run() {
                 power_percent: Arc::new(AtomicU32::new(100)),
                 gpu_adapter_name,
                 gpu_enabled: Arc::new(AtomicBool::new(false)),
+                pool_enabled: Arc::new(AtomicBool::new(false)),
             });
 
             // System tray -- lets mining keep running in the background when
@@ -634,6 +835,13 @@ pub fn run() {
             gpu_adapter_name,
             get_gpu_enabled,
             set_gpu_enabled,
+            get_pool_enabled,
+            set_pool_enabled,
+            get_pool_icp_allowance,
+            approve_icp_for_pool,
+            get_my_pool_share,
+            get_pool_stats,
+            claim_pool_reward,
             quit_app
         ])
         .run(tauri::generate_context!())

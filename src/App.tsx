@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Confetti } from "./components/Confetti";
@@ -171,6 +171,21 @@ function App() {
   const [gpuAdapterName, setGpuAdapterName] = useState<string | null>(null);
   const [gpuEnabled, setGpuEnabled] = useState(false);
 
+  const [poolEnabled, setPoolEnabled] = useState(false);
+  const [poolAllowance, setPoolAllowance] = useState<string | null>(null);
+  const [approvingPool, setApprovingPool] = useState(false);
+  const [poolApproveBlocks, setPoolApproveBlocks] = useState(20);
+  const [poolShares, setPoolShares] = useState<number | null>(null);
+  const [poolPendingReward, setPoolPendingReward] = useState<string | null>(null);
+  const [poolRoundTotalShares, setPoolRoundTotalShares] = useState<number | null>(null);
+  const [poolHashrate, setPoolHashrate] = useState<number | null>(null);
+  const [claiming, setClaiming] = useState(false);
+  const [claimStatus, setClaimStatus] = useState<string | null>(null);
+  // Last (timestamp, currentRoundTotalShares) sample, used to turn the
+  // share-count polling below into an estimated pool-wide hashrate -- a
+  // ref, not state, since only the derived rate needs to trigger a render.
+  const lastPoolShareSampleRef = useRef<{ t: number; shares: number } | null>(null);
+
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
@@ -200,6 +215,7 @@ function App() {
     invoke<boolean>("get_autostart").then(setAutostartState).catch(() => {});
     invoke<string | null>("gpu_adapter_name").then(setGpuAdapterName).catch(() => {});
     invoke<boolean>("get_gpu_enabled").then(setGpuEnabled).catch(() => {});
+    invoke<boolean>("get_pool_enabled").then(setPoolEnabled).catch(() => {});
     refreshBalances();
     const interval = setInterval(refreshBalances, 10000);
     return () => clearInterval(interval);
@@ -212,6 +228,91 @@ function App() {
       setGpuEnabled(next);
     } catch (err) {
       console.error("Failed to toggle GPU mining", err);
+    }
+  }
+
+  async function handleTogglePool() {
+    const next = !poolEnabled;
+    try {
+      await invoke("set_pool_enabled", { enabled: next });
+      setPoolEnabled(next);
+    } catch (err) {
+      console.error("Failed to toggle pool mining", err);
+    }
+  }
+
+  const refreshPoolStatus = useCallback(async () => {
+    try {
+      const [allow, [sharesStr, pendingReward], [totalSharesStr, shareBitsStr]] = await Promise.all([
+        invoke<string>("get_pool_icp_allowance"),
+        invoke<[string, string]>("get_my_pool_share"),
+        invoke<[string, string]>("get_pool_stats"),
+      ]);
+      setPoolAllowance(allow);
+      const shares = Number(sharesStr);
+      const totalShares = Number(totalSharesStr);
+      setPoolShares(shares);
+      setPoolPendingReward(pendingReward);
+      setPoolRoundTotalShares(totalShares);
+
+      // Shares arrive at a Poisson rate proportional to hashrate at a fixed
+      // difficulty (the same principle real mining pools use to estimate
+      // hashrate from submission rate) -- so the pool-wide rate of new
+      // shares between two samples, scaled by 2^shareDifficultyBits, is an
+      // estimate of the pool's combined hashrate. A round win resets
+      // currentRoundTotalShares to 0 between samples, which would read as
+      // a huge negative rate -- skip the estimate for that one tick rather
+      // than show garbage, and let it resume from the next pair of samples.
+      const now = Date.now();
+      const last = lastPoolShareSampleRef.current;
+      if (last && totalShares >= last.shares) {
+        const deltaSeconds = (now - last.t) / 1000;
+        if (deltaSeconds > 0) {
+          const shareBits = Number(shareBitsStr);
+          setPoolHashrate(((totalShares - last.shares) / deltaSeconds) * Math.pow(2, shareBits));
+        }
+      } else {
+        setPoolHashrate(null);
+      }
+      lastPoolShareSampleRef.current = { t: now, shares: totalShares };
+    } catch (err) {
+      console.error("Failed to refresh pool status", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!poolEnabled) return;
+    refreshPoolStatus();
+    const interval = setInterval(refreshPoolStatus, 10000);
+    return () => clearInterval(interval);
+  }, [poolEnabled, refreshPoolStatus]);
+
+  async function handleApprovePool() {
+    setApprovingPool(true);
+    try {
+      await invoke("approve_icp_for_pool", { blocks: Math.max(1, Math.trunc(poolApproveBlocks) || 1) });
+      const allow = await invoke<string>("get_pool_icp_allowance");
+      setPoolAllowance(allow);
+    } catch (err) {
+      setMessage(`Pool approval failed: ${err}`);
+      setMessageKind("critical");
+    } finally {
+      setApprovingPool(false);
+    }
+  }
+
+  async function handleClaimPoolReward() {
+    setClaiming(true);
+    setClaimStatus(null);
+    try {
+      await invoke("claim_pool_reward");
+      setClaimStatus("Claimed.");
+      await refreshPoolStatus();
+      await refreshBalances();
+    } catch (err) {
+      setClaimStatus(`Claim failed: ${err}`);
+    } finally {
+      setClaiming(false);
     }
   }
 
@@ -564,6 +665,75 @@ function App() {
                   Use {gpuAdapterName}
                 </label>
                 <span className="power-hint">alongside CPU threads, takes effect on next start</span>
+              </div>
+            )}
+
+            <div className="power-row">
+              <span className="power-label">Pool mining:</span>
+              <label className="gpu-toggle">
+                <input type="checkbox" checked={poolEnabled} onChange={handleTogglePool} />
+                Share rewards via PikoPool
+              </label>
+              <span className="power-hint">proportional split with everyone else mining, takes effect on next start</span>
+            </div>
+
+            {poolEnabled && (
+              <div>
+                <div className="approve-row">
+                  <label className="approve-blocks-label">
+                    Approve pool for
+                    <input
+                      className="input approve-blocks-input"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={poolApproveBlocks}
+                      onChange={(e) => setPoolApproveBlocks(Math.max(1, Math.trunc(Number(e.target.value)) || 1))}
+                      disabled={approvingPool}
+                    />
+                    blocks
+                  </label>
+                  <button className="button secondary" onClick={handleApprovePool} disabled={approvingPool}>
+                    {approvingPool ? "Approving..." : "Approve ICP for pool"}
+                  </button>
+                </div>
+
+                <div className="stat-grid">
+                  <div className="stat-tile">
+                    <div className="stat-label">Pool ICP allowance</div>
+                    <div className="stat-value">{poolAllowance !== null ? formatAmount(poolAllowance) : "..."}</div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-label">Shares this round</div>
+                    <div className="stat-value">{poolShares !== null ? formatCount(poolShares) : "..."}</div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-label">Pool hashrate</div>
+                    <div className="stat-value">
+                      {poolHashrate !== null ? formatHashrate(poolHashrate) : "estimating..."}
+                      {poolShares !== null && poolRoundTotalShares !== null && poolRoundTotalShares > 0 && (
+                        <span className="stat-value-suffix"> ({((poolShares / poolRoundTotalShares) * 100).toFixed(1)}% ours)</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-label">Pending pool reward</div>
+                    <div className="stat-value stat-value-row">
+                      {poolPendingReward !== null ? formatAmount(poolPendingReward) : "..."}
+                      <img src="/piko-logo.svg" alt="PIKO" className="token-icon" />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={handleClaimPoolReward}
+                  disabled={claiming || !poolPendingReward || poolPendingReward === "0"}
+                >
+                  {claiming ? "Claiming..." : "Claim pool reward"}
+                </button>
+                {claimStatus && <p className="wallet-status">{claimStatus}</p>}
               </div>
             )}
 

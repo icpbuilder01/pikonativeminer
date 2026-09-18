@@ -20,15 +20,24 @@ struct Params {
     nonce_base_lo: u32,
     iterations: u32,
     difficulty_bits: u32,
+    // Pool mode's easier threshold -- u32::MAX ("never satisfiable", a
+    // hash's leading-zero-bit count tops out at 256) when pool mode is
+    // off, so the share check below stays an unconditional comparison
+    // with no separate enable flag needed.
+    share_difficulty_bits: u32,
     total_threads: u32,
-    _pad: u32,
 };
 
 struct Found {
     flag: atomic<u32>,
     nonce_hi: u32,
     nonce_lo: u32,
-    _pad: u32,
+    // Best-effort, first-share-per-batch only (see the write site below for
+    // why losing extra shares within one ~130ms batch is an acceptable
+    // efficiency trade, never a correctness or fund-safety issue).
+    share_flag: atomic<u32>,
+    share_nonce_hi: u32,
+    share_nonce_lo: u32,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -147,6 +156,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (prev == 0u) {
                 found.nonce_hi = hi;
                 found.nonce_lo = lo;
+            }
+        } else if (total >= params.share_difficulty_bits) {
+            // Doesn't stop the search (no equivalent of the full-match
+            // flag's role in ending the batch loop) -- this thread just
+            // keeps hashing; the host side reads this alongside the full
+            // result after the batch and forwards it to the pool.
+            let prevShare = atomicExchange(&found.share_flag, 1u);
+            if (prevShare == 0u) {
+                found.share_nonce_hi = hi;
+                found.share_nonce_lo = lo;
             }
         }
 
