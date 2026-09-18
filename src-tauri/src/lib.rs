@@ -357,11 +357,12 @@ async fn get_my_pool_share(state: State<'_, AppState>) -> Result<(String, String
 /// from half to several times the real hashrate depending on the window.
 /// Distinct-participant count is exact and a more useful figure anyway.
 #[tauri::command]
-async fn get_pool_stats(state: State<'_, AppState>) -> Result<(String, String), String> {
+async fn get_pool_stats(state: State<'_, AppState>) -> Result<(String, String, String), String> {
     let stats = agent::get_pool_stats(&state.agent).await.map_err(|e| e.to_string())?;
     Ok((
         nat_to_plain_string(&stats.currentRoundTotalShares),
         nat_to_plain_string(&stats.activeMinersThisRound),
+        nat_to_plain_string(&stats.activeMinersNow),
     ))
 }
 
@@ -518,6 +519,12 @@ async fn mining_supervisor(
         let mut last_report = std::time::Instant::now();
         let mut last_hash_count: u64 = 0;
         let mut last_stale_check = std::time::Instant::now();
+        // Comfortably inside pikopool's own 60s ACTIVE_WINDOW_NANOS so a
+        // single missed/slow heartbeat doesn't drop this miner out of the
+        // "active now" count -- best-effort, a failed ping just means the
+        // count under-reports this miner until the next one lands, never a
+        // reason to interrupt mining.
+        let mut last_heartbeat = std::time::Instant::now() - Duration::from_secs(30);
         // Shares can arrive far faster than pikopool's own 0.3s per-caller
         // rate limit allows -- submitting every single one would mostly
         // just burn round-trips on TooSoon for nothing, so only the most
@@ -691,6 +698,17 @@ async fn mining_supervisor(
                 last_hash_count = current;
                 last_report = now;
                 emit_progress(&app, hashrate, session_attempts, session_blocks, "", "");
+            }
+
+            // Every ~20s while pool mode is on, ping pikopool so it can
+            // count this miner in activeMinersNow -- decoupled from actual
+            // share submissions, which arrive at whatever rate luck against
+            // shareDifficultyBits allows (rare enough that they can't serve
+            // as a "mining right now" signal on their own). Best-effort:
+            // errors are ignored, exactly like the stale-work check below.
+            if pool_mode && now.duration_since(last_heartbeat).as_secs() >= 20 {
+                last_heartbeat = now;
+                let _ = agent::pool_heartbeat(&agent).await;
             }
 
             // Every ~3s, check whether the chain has moved on (someone else
