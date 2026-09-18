@@ -676,7 +676,8 @@ function App() {
             </div>
 
             {poolEnabled && (
-              <div>
+              <div className="pool-subpanel">
+                <div className="pool-subpanel-label">PikoPool</div>
                 <div className="approve-row">
                   <label className="approve-blocks-label">
                     Approve pool for
@@ -724,7 +725,7 @@ function App() {
                     </div>
                   </div>
                   <div className="stat-tile" title="Distinct wallets that have pinged the pool in the last ~60 seconds -- who's actually mining right now, not just who has contributed since the last win.">
-                    <div className="stat-label">Mining right now</div>
+                    <div className="stat-label">Mining right now (in the pool)</div>
                     <div className="stat-value">{poolActiveMinersNow !== null ? formatCount(poolActiveMinersNow) : "..."}</div>
                   </div>
                   <div className="stat-tile">

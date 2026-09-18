@@ -483,6 +483,32 @@ section.block > *:last-child {
   flex-wrap: wrap;
 }
 
+/* Groups every pool-specific control/stat into one visually distinct,
+   inset box (same bevel direction as a stat-tile, just bigger) so it
+   reads as one coherent "this is all about the pool" unit instead of
+   floating stats that could be mistaken for general mining stats. */
+.pool-subpanel {
+  background: var(--surface-2);
+  border-style: solid;
+  border-width: 2px;
+  border-top-color: var(--bevel-lo);
+  border-left-color: var(--bevel-lo);
+  border-bottom-color: var(--bevel-hi);
+  border-right-color: var(--bevel-hi);
+  padding: 14px;
+  margin-top: 6px;
+}
+
+.pool-subpanel-label {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
 .power-row {
   display: flex;
   align-items: center;
