@@ -102,6 +102,16 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     }
 }
 
+// Closing the window only hides it (see the on_window_event handler below)
+// so background mining survives an accidental close -- but that leaves no
+// obvious way to actually exit short of finding the tray icon, which isn't
+// always visible (stock GNOME needs an extension for it). This gives every
+// platform a discoverable way to fully quit from inside the window itself.
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 async fn get_network_stats(state: State<'_, AppState>) -> Result<NetworkStats, String> {
     let stats = agent::get_stats(&state.agent).await.map_err(|e| e.to_string())?;
@@ -454,7 +464,8 @@ pub fn run() {
             set_autostart,
             start_mining,
             stop_mining,
-            set_power_percent
+            set_power_percent,
+            quit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
