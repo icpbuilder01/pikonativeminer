@@ -182,9 +182,17 @@ function App() {
   const [poolHashrate, setPoolHashrate] = useState<number | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [claimStatus, setClaimStatus] = useState<string | null>(null);
-  // Last (timestamp, currentRoundTotalShares) sample, used to turn the
-  // share-count polling below into an estimated pool-wide hashrate -- a
-  // ref, not state, since only the derived rate needs to trigger a render.
+  // Baseline (timestamp, currentRoundTotalShares) the hashrate estimate
+  // below is measured from -- a ref, not state, since only the derived
+  // rate needs to trigger a render. Deliberately NOT updated on every
+  // poll: shares arrive as a Poisson process, so at low hashrate (a lone
+  // miner, or a low share rate relative to shareDifficultyBits) most
+  // individual 10s polling windows see zero new shares purely by chance,
+  // which would make a window-over-window estimate flicker at 0 most of
+  // the time even though real shares are steadily accumulating. Keeping
+  // the baseline fixed and measuring against it lets the window grow
+  // (10s, then 20s, then 30s...), averaging out that noise instead of
+  // re-randomizing it every tick.
   const lastPoolShareSampleRef = useRef<{ t: number; shares: number } | null>(null);
 
   useEffect(() => {
@@ -260,23 +268,31 @@ function App() {
       // Shares arrive at a Poisson rate proportional to hashrate at a fixed
       // difficulty (the same principle real mining pools use to estimate
       // hashrate from submission rate) -- so the pool-wide rate of new
-      // shares between two samples, scaled by 2^shareDifficultyBits, is an
-      // estimate of the pool's combined hashrate. A round win resets
-      // currentRoundTotalShares to 0 between samples, which would read as
-      // a huge negative rate -- skip the estimate for that one tick rather
-      // than show garbage, and let it resume from the next pair of samples.
+      // shares since the baseline below, scaled by 2^shareDifficultyBits,
+      // is an estimate of the pool's combined hashrate. Measured against a
+      // FIXED baseline, not the previous poll: at low absolute share rates
+      // (a lone miner, or few participants relative to shareDifficultyBits)
+      // a 10s window-over-window delta is almost pure noise -- most 10s
+      // windows see zero arrivals by chance (reading as a stuck 0 H/s), and
+      // an occasional window with 2-3 arrivals reads as several times the
+      // real hashrate. Keeping the baseline fixed lets the averaging window
+      // grow (10s, then 20s, 30s...), which converges to the true rate
+      // instead of re-randomizing every tick.
       const now = Date.now();
-      const last = lastPoolShareSampleRef.current;
-      if (last && totalShares >= last.shares) {
-        const deltaSeconds = (now - last.t) / 1000;
+      const baseline = lastPoolShareSampleRef.current;
+      if (!baseline || totalShares < baseline.shares) {
+        // No baseline yet, or a round just won (currentRoundTotalShares
+        // reset to 0) -- start a fresh baseline and wait for the next poll
+        // rather than showing a stale or huge-negative estimate.
+        lastPoolShareSampleRef.current = { t: now, shares: totalShares };
+        setPoolHashrate(null);
+      } else {
+        const deltaSeconds = (now - baseline.t) / 1000;
         if (deltaSeconds > 0) {
           const shareBits = Number(shareBitsStr);
-          setPoolHashrate(((totalShares - last.shares) / deltaSeconds) * Math.pow(2, shareBits));
+          setPoolHashrate(((totalShares - baseline.shares) / deltaSeconds) * Math.pow(2, shareBits));
         }
-      } else {
-        setPoolHashrate(null);
       }
-      lastPoolShareSampleRef.current = { t: now, shares: totalShares };
     } catch (err) {
       console.error("Failed to refresh pool status", err);
     }
