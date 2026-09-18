@@ -9,6 +9,7 @@ interface MiningProgress {
   sessionBlocks: number;
   message: string;
   messageKind: string;
+  stopped: boolean;
 }
 
 interface NetworkStats {
@@ -241,6 +242,14 @@ function App() {
         setMessage(p.message);
         setMessageKind(p.messageKind);
         if (p.messageKind === "good") refreshBalances();
+      }
+      // The backend loop has actually exited (e.g. exhausted ICP
+      // allowance) -- reflect that in the UI instead of leaving the Stop
+      // button showing while nothing is hashing anymore.
+      if (p.stopped) {
+        setMining(false);
+        setHashrate(0);
+        refreshBalances();
       }
     });
     return () => {
