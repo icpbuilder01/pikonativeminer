@@ -10,6 +10,10 @@ use ic_agent::identity::BasicIdentity;
 use ic_agent::Agent;
 
 pub const MOTHER_CANISTER_ID: &str = "45mjf-rqaaa-aaaaj-qsedq-cai";
+// PikoPool (~/pikopool, built 2026-09-18), deployed to mainnet, its
+// motherId/pikoLedgerId/icpLedgerId locked to the real mainnet values and
+// already funded/approved to pay mother's mining fee.
+pub const POOL_CANISTER_ID: &str = "feqm6-7aaaa-aaaap-quzsa-cai";
 pub const ICP_LEDGER_CANISTER_ID: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 pub const PIKO_LEDGER_CANISTER_ID: &str = "56aad-fiaaa-aaaaj-qsefa-cai";
 // DFINITY's recommended mainnet endpoint for a raw agent (not going through
@@ -88,6 +92,130 @@ pub async fn submit_proof(agent: &Agent, nonce: u64) -> Result<SubmitResult> {
         .await
         .context("submitProof call failed")?;
     let result = Decode!(response.as_slice(), SubmitResult)?;
+    Ok(result)
+}
+
+pub async fn get_pool_config(agent: &Agent) -> Result<PoolConfig> {
+    let canister_id = Principal::from_text(POOL_CANISTER_ID)?;
+    let response = agent
+        .query(&canister_id, "getPoolConfig")
+        .with_arg(Encode!()?)
+        .call()
+        .await
+        .context("getPoolConfig call failed")?;
+    let config = Decode!(response.as_slice(), PoolConfig)?;
+    Ok(config)
+}
+
+pub async fn get_pool_stats(agent: &Agent) -> Result<PoolStats> {
+    let canister_id = Principal::from_text(POOL_CANISTER_ID)?;
+    let response = agent
+        .query(&canister_id, "getPoolStats")
+        .with_arg(Encode!()?)
+        .call()
+        .await
+        .context("getPoolStats call failed")?;
+    let stats = Decode!(response.as_slice(), PoolStats)?;
+    Ok(stats)
+}
+
+/// Reports a candidate nonce to the pool instead of directly to `mother` --
+/// used for every qualifying find while pool mode is on, whether it only
+/// clears the pool's own (easier) share target or clears the real network
+/// difficulty too. Solo-submitting a real winning nonce straight to
+/// `mother` while pool mode is on would let that one lucky thread keep
+/// 100% of the reward instead of sharing it, defeating the entire point.
+pub async fn submit_share(agent: &Agent, height: u64, nonce: u64) -> Result<ShareResult> {
+    let canister_id = Principal::from_text(POOL_CANISTER_ID)?;
+    let response = agent
+        .update(&canister_id, "submitShare")
+        .with_arg(Encode!(&Nat::from(height), &Nat::from(nonce))?)
+        .call_and_wait()
+        .await
+        .context("submitShare call failed")?;
+    let result = Decode!(response.as_slice(), ShareResult)?;
+    Ok(result)
+}
+
+/// Approves `amount` e8s of ICP for pikopool to pull as this miner's
+/// proportional share of mother's mining fee whenever the pool wins a
+/// block -- a separate approval from `approve_icp` (which is scoped to
+/// mother, for solo mining), since pikopool is a different spender.
+pub async fn approve_icp_for_pool(agent: &Agent, amount: Nat) -> Result<Nat> {
+    let canister_id = Principal::from_text(ICP_LEDGER_CANISTER_ID)?;
+    let pool_id = Principal::from_text(POOL_CANISTER_ID)?;
+    let args = ApproveArgs {
+        fee: None,
+        memo: None,
+        from_subaccount: None,
+        created_at_time: None,
+        amount,
+        expected_allowance: None,
+        expires_at: None,
+        spender: Account {
+            owner: pool_id,
+            subaccount: None,
+        },
+    };
+    let response = agent
+        .update(&canister_id, "icrc2_approve")
+        .with_arg(Encode!(&args)?)
+        .call_and_wait()
+        .await
+        .context("icrc2_approve (pikopool) call failed")?;
+    let result = Decode!(response.as_slice(), ApproveResult)?;
+    match result {
+        ApproveResult::Ok(block_index) => Ok(block_index),
+        ApproveResult::Err(e) => bail!("approval rejected: {:?}", e),
+    }
+}
+
+/// Current ICP allowance this miner has granted pikopool (distinct from
+/// `icp_allowance`, which checks mother's own allowance).
+pub async fn icp_allowance_for_pool(agent: &Agent, owner: Principal) -> Result<Nat> {
+    let canister_id = Principal::from_text(ICP_LEDGER_CANISTER_ID)?;
+    let pool_id = Principal::from_text(POOL_CANISTER_ID)?;
+    let args = AllowanceArgs {
+        account: Account {
+            owner,
+            subaccount: None,
+        },
+        spender: Account {
+            owner: pool_id,
+            subaccount: None,
+        },
+    };
+    let response = agent
+        .query(&canister_id, "icrc2_allowance")
+        .with_arg(Encode!(&args)?)
+        .call()
+        .await
+        .context("icrc2_allowance (pikopool) call failed")?;
+    let allowance = Decode!(response.as_slice(), Allowance)?;
+    Ok(allowance.allowance)
+}
+
+pub async fn get_my_pool_share(agent: &Agent) -> Result<MyShare> {
+    let canister_id = Principal::from_text(POOL_CANISTER_ID)?;
+    let response = agent
+        .query(&canister_id, "getMyShare")
+        .with_arg(Encode!()?)
+        .call()
+        .await
+        .context("getMyShare call failed")?;
+    let share = Decode!(response.as_slice(), MyShare)?;
+    Ok(share)
+}
+
+pub async fn claim_pool_reward(agent: &Agent) -> Result<TransferResult> {
+    let canister_id = Principal::from_text(POOL_CANISTER_ID)?;
+    let response = agent
+        .update(&canister_id, "claimPoolReward")
+        .with_arg(Encode!()?)
+        .call_and_wait()
+        .await
+        .context("claimPoolReward call failed")?;
+    let result = Decode!(response.as_slice(), TransferResult)?;
     Ok(result)
 }
 
