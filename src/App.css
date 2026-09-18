@@ -132,6 +132,16 @@ body {
   cursor: pointer;
 }
 
+.gpu-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 .difficulty-chart {
   width: 100%;
   height: 48px;

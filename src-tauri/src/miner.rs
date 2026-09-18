@@ -14,12 +14,18 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Copy)]
 pub struct MiningJob {
     pub previous_hash: [u8; 32],
     pub height: u64,
     pub difficulty_bits: u32,
 }
 
+// Owns every search thread for a job -- CPU threads always, plus the GPU
+// thread too when GPU mining is enabled (see gpu.rs). Both kinds share the
+// same stop_flag/hash_count/tx (constructed once by the caller in lib.rs)
+// so the supervisor only ever has one hashrate counter and one winner
+// channel to watch, regardless of how many search backends are active.
 pub struct MiningHandle {
     stop_flag: Arc<AtomicBool>,
     pub hash_count: Arc<AtomicU64>,
@@ -27,6 +33,18 @@ pub struct MiningHandle {
 }
 
 impl MiningHandle {
+    pub fn new(stop_flag: Arc<AtomicBool>, hash_count: Arc<AtomicU64>) -> Self {
+        MiningHandle {
+            stop_flag,
+            hash_count,
+            threads: Vec::new(),
+        }
+    }
+
+    pub fn add_threads(&mut self, threads: Vec<thread::JoinHandle<()>>) {
+        self.threads.extend(threads);
+    }
+
     pub fn stop(self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         for t in self.threads {
@@ -35,15 +53,15 @@ impl MiningHandle {
     }
 }
 
-fn nonce_to_bytes8(n: u64) -> [u8; 8] {
+pub fn nonce_to_bytes8(n: u64) -> [u8; 8] {
     n.to_be_bytes()
 }
 
-fn height_to_bytes8(n: u64) -> [u8; 8] {
+pub fn height_to_bytes8(n: u64) -> [u8; 8] {
     n.to_be_bytes()
 }
 
-fn leading_zero_bits(hash: &[u8]) -> u32 {
+pub fn leading_zero_bits(hash: &[u8]) -> u32 {
     let mut count = 0u32;
     for byte in hash {
         if *byte == 0 {
@@ -58,10 +76,12 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
 
 /// Starts `num_threads` search threads, each hashing a disjoint slice of
 /// the nonce space (workerIndex + k*workerCount, exactly like the browser
-/// worker) starting from a shared random offset for this job. Returns a
-/// handle to stop the search, a shared hash-attempt counter for live
-/// hashrate reporting, and a channel receiver that yields the winning
-/// nonce once any thread finds one.
+/// worker) starting from a shared random offset for this job. `stop_flag`,
+/// `hash_count` and `tx` are owned by the caller (lib.rs's supervisor) so a
+/// GPU search (see gpu.rs) can be started against the very same job and
+/// report into the same counter/channel -- returns just the thread handles,
+/// not a full MiningHandle, so the caller can merge them with the GPU
+/// thread's handle into one.
 pub fn start_mining(
     job: MiningJob,
     num_threads: usize,
@@ -70,11 +90,10 @@ pub fn start_mining(
     // the browser worker's own dutyCycle -- read fresh every loop
     // iteration, not captured once at spawn time. 0-100, 100 = full speed.
     power_percent: Arc<AtomicU32>,
-) -> (MiningHandle, std::sync::mpsc::Receiver<u64>) {
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    let hash_count = Arc::new(AtomicU64::new(0));
-    let (tx, rx) = std::sync::mpsc::channel::<u64>();
-
+    stop_flag: Arc<AtomicBool>,
+    hash_count: Arc<AtomicU64>,
+    tx: std::sync::mpsc::Sender<u64>,
+) -> Vec<thread::JoinHandle<()>> {
     let mut header = [0u8; 40];
     header[..32].copy_from_slice(&job.previous_hash);
     header[32..].copy_from_slice(&height_to_bytes8(job.height));
@@ -157,12 +176,5 @@ pub fn start_mining(
         }));
     }
 
-    (
-        MiningHandle {
-            stop_flag,
-            hash_count,
-            threads,
-        },
-        rx,
-    )
+    threads
 }
