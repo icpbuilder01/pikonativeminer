@@ -653,7 +653,17 @@ async fn mining_supervisor(
                                 )
                             );
                             if insufficient {
-                                stop_flag.store(true, Ordering::Relaxed);
+                                // stop_flag here is the OUTER supervisor-level flag
+                                // (tied to state.mining_stop) -- setting it alone does
+                                // NOT stop the actual CPU/GPU hashing threads, which
+                                // check their own separate per-job job_stop_flag
+                                // instead. handle.stop() is what actually signals
+                                // that flag and joins every thread; skipping it left
+                                // them running full-tilt in the background forever,
+                                // orphaned, even though the UI correctly showed
+                                // "Mining stopped" -- reported live by a user whose
+                                // system kept running hot after allowance ran out.
+                                handle.stop();
                                 emit_stopped(
                                     &app,
                                     session_attempts,
