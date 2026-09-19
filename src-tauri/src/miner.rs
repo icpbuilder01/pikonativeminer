@@ -50,9 +50,18 @@ impl MiningHandle {
         self.threads.extend(threads);
     }
 
-    pub fn stop(self) {
+    // &mut self, not self -- idempotent (safe to call more than once; a
+    // later call just joins an already-empty Vec) so callers with multiple
+    // stop-triggering branches in the same loop scope don't fight the
+    // borrow checker over which one gets to consume the handle. A real gap
+    // this exact pattern used to leave open: one such branch only ever
+    // touched a different, outer-level stop flag and skipped calling this
+    // at all, leaving every real hashing thread running full-tilt in the
+    // background forever, orphaned, even though the UI correctly showed
+    // "Mining stopped".
+    pub fn stop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
-        for t in self.threads {
+        for t in std::mem::take(&mut self.threads) {
             let _ = t.join();
         }
     }
