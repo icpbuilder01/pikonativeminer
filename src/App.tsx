@@ -33,9 +33,24 @@ interface DifficultyPoint {
 
 const DIFFICULTY_HISTORY_LIMIT = 60;
 
-type PowerLevel = "low" | "high" | "max";
-const POWER_PERCENT: Record<PowerLevel, number> = { low: 32, high: 75, max: 100 };
-const POWER_STORAGE_KEY = "piko-mining-power";
+// Replaced the old low/high/max buttons with a plain 5%-step slider --
+// 100% (no duty-cycle throttling at all, see miner.rs's own comment) was
+// reported live to freeze/thermal-throttle a high-core-count CPU (a Ryzen
+// 9800X3D) on Windows; a slider lets someone pick e.g. 95% for a real
+// breathing-room duty cycle instead of being stuck between "cooler but a
+// big jump down" (75%) and "pins every core with zero headroom" (100%).
+const CPU_POWER_STORAGE_KEY = "piko-mining-cpu-power";
+const GPU_POWER_STORAGE_KEY = "piko-mining-gpu-power";
+const GPU_ENABLED_STORAGE_KEY = "piko-mining-gpu-enabled";
+
+function loadStoredPercent(key: string, fallback: number): number {
+  try {
+    const stored = Number(localStorage.getItem(key));
+    return Number.isFinite(stored) && stored >= 5 && stored <= 100 ? stored : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 type Token = "PIKO" | "ICP";
 
@@ -141,17 +156,10 @@ function App() {
   const [approving, setApproving] = useState(false);
   const [approveBlocks, setApproveBlocks] = useState(20);
   const [mining, setMining] = useState(false);
-  const [power, setPower] = useState<PowerLevel>(() => {
-    try {
-      const stored = localStorage.getItem(POWER_STORAGE_KEY);
-      return stored === "low" || stored === "high" || stored === "max" ? stored : "max";
-    } catch {
-      return "max";
-    }
-  });
+  const [cpuPower, setCpuPower] = useState(() => loadStoredPercent(CPU_POWER_STORAGE_KEY, 100));
+  const [gpuPower, setGpuPower] = useState(() => loadStoredPercent(GPU_POWER_STORAGE_KEY, 100));
   const [hashrate, setHashrate] = useState(0);
   const [sessionAttempts, setSessionAttempts] = useState(0);
-  const [sessionBlocks, setSessionBlocks] = useState(0);
   const [totalBlocks, setTotalBlocks] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [messageKind, setMessageKind] = useState<string>("");
@@ -181,6 +189,11 @@ function App() {
   const [poolRoundTotalShares, setPoolRoundTotalShares] = useState<number | null>(null);
   const [poolActiveMiners, setPoolActiveMiners] = useState<number | null>(null);
   const [poolActiveMinersNow, setPoolActiveMinersNow] = useState<number | null>(null);
+  // Global, all-time count of blocks the POOL has won (from pikopool's own
+  // getPoolStats), shown regardless of whether pool mode is on -- distinct
+  // from the old per-session counter, which reset on every restart and
+  // only reflected this one installation's own activity.
+  const [poolBlocksWon, setPoolBlocksWon] = useState<number | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [claimStatus, setClaimStatus] = useState<string | null>(null);
 
@@ -206,14 +219,40 @@ function App() {
     } catch (err) {
       console.error("Failed to refresh balances", err);
     }
+    try {
+      const [, , , poolBlocksWonStr] = await invoke<[string, string, string, string]>("get_pool_stats");
+      setPoolBlocksWon(Number(poolBlocksWonStr));
+    } catch (err) {
+      console.error("Failed to refresh pool blocks won", err);
+    }
   }, []);
 
   useEffect(() => {
     invoke<string>("get_principal").then(setPrincipal);
     invoke<boolean>("get_autostart").then(setAutostartState).catch(() => {});
-    invoke<string | null>("gpu_adapter_name").then(setGpuAdapterName).catch(() => {});
-    invoke<boolean>("get_gpu_enabled").then(setGpuEnabled).catch(() => {});
     invoke<boolean>("get_pool_enabled").then(setPoolEnabled).catch(() => {});
+    // Backend's own gpu_enabled always starts false on every launch (no
+    // persistence on that side at all) -- restore the user's last choice
+    // from localStorage here instead, same mechanism the power sliders
+    // use, but only once a real adapter is confirmed present. Reported
+    // live: this choice silently reverting to off on every restart meant
+    // someone with a perfectly good GPU could end up CPU-only without
+    // ever noticing, since nothing flags that it changed.
+    invoke<string | null>("gpu_adapter_name").then((name) => {
+      setGpuAdapterName(name);
+      if (!name) return;
+      let wantEnabled = false;
+      try {
+        wantEnabled = localStorage.getItem(GPU_ENABLED_STORAGE_KEY) === "true";
+      } catch {
+        // best-effort only
+      }
+      if (wantEnabled) {
+        invoke("set_gpu_enabled", { enabled: true })
+          .then(() => setGpuEnabled(true))
+          .catch(() => {});
+      }
+    }).catch(() => {});
     refreshBalances();
     const interval = setInterval(refreshBalances, 10000);
     return () => clearInterval(interval);
@@ -224,6 +263,11 @@ function App() {
     try {
       await invoke("set_gpu_enabled", { enabled: next });
       setGpuEnabled(next);
+      try {
+        localStorage.setItem(GPU_ENABLED_STORAGE_KEY, String(next));
+      } catch {
+        // best-effort only
+      }
       if (!next) setGpuError(null);
     } catch (err) {
       console.error("Failed to toggle GPU mining", err);
@@ -242,16 +286,17 @@ function App() {
 
   const refreshPoolStatus = useCallback(async () => {
     try {
-      const [allow, [sharesStr, pendingReward], [totalSharesStr, activeMinersStr, activeMinersNowStr]] = await Promise.all([
+      const [allow, [sharesStr, pendingReward], [totalSharesStr, activeMinersStr, activeMinersNowStr, poolBlocksWonStr]] = await Promise.all([
         invoke<string>("get_pool_icp_allowance"),
         invoke<[string, string]>("get_my_pool_share"),
-        invoke<[string, string, string]>("get_pool_stats"),
+        invoke<[string, string, string, string]>("get_pool_stats"),
       ]);
       setPoolAllowance(allow);
       setPoolShares(Number(sharesStr));
       setPoolPendingReward(pendingReward);
       setPoolRoundTotalShares(Number(totalSharesStr));
       setPoolActiveMiners(Number(activeMinersStr));
+      setPoolBlocksWon(Number(poolBlocksWonStr));
       setPoolActiveMinersNow(Number(activeMinersNowStr));
     } catch (err) {
       console.error("Failed to refresh pool status", err);
@@ -319,15 +364,26 @@ function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(POWER_STORAGE_KEY, power);
+      localStorage.setItem(CPU_POWER_STORAGE_KEY, String(cpuPower));
     } catch {
       // best-effort only -- a blocked/full localStorage just means the
       // level won't survive a restart, not a functional problem
     }
-    invoke("set_power_percent", { percent: POWER_PERCENT[power] }).catch((err) => {
-      console.error("Failed to set power level", err);
+    invoke("set_cpu_power_percent", { percent: cpuPower }).catch((err) => {
+      console.error("Failed to set CPU power", err);
     });
-  }, [power]);
+  }, [cpuPower]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(GPU_POWER_STORAGE_KEY, String(gpuPower));
+    } catch {
+      // best-effort only
+    }
+    invoke("set_gpu_power_percent", { percent: gpuPower }).catch((err) => {
+      console.error("Failed to set GPU power", err);
+    });
+  }, [gpuPower]);
 
   async function handleToggleAutostart() {
     const next = !autostart;
@@ -348,7 +404,6 @@ function App() {
       const p = event.payload;
       setHashrate(p.hashrate);
       setSessionAttempts((n) => Math.max(n, p.sessionAttempts));
-      setSessionBlocks(p.sessionBlocks);
       if (p.message) {
         setMessage(p.message);
         setMessageKind(p.messageKind);
@@ -400,7 +455,6 @@ function App() {
 
   async function handleStart() {
     setSessionAttempts(0);
-    setSessionBlocks(0);
     setMessage(null);
     setMessageKind("");
     setMining(true);
@@ -624,21 +678,18 @@ function App() {
             </div>
 
             <div className="power-row">
-              <span className="power-label">Power:</span>
-              <div className="power-buttons">
-                {(["low", "high", "max"] as const).map((level) => (
-                  <button
-                    key={level}
-                    type="button"
-                    className={`button small power-btn ${power === level ? "active" : ""}`}
-                    onClick={() => setPower(level)}
-                  >
-                    {level === "low" ? "Low" : level === "high" ? "High" : "Max"}
-                  </button>
-                ))}
-              </div>
+              <span className="power-label">CPU power:</span>
+              <input
+                type="range"
+                className="power-slider"
+                min={5}
+                max={100}
+                step={5}
+                value={cpuPower}
+                onChange={(e) => setCpuPower(Number(e.target.value))}
+              />
               <span className="power-hint">
-                {power === "max" ? "full CPU speed" : power === "high" ? "~75% CPU, cooler" : "~32% CPU, coolest"}
+                {cpuPower}% -- {cpuPower === 100 ? "no throttling, every core flat out" : `~${cpuPower}% duty cycle`}
               </span>
             </div>
 
@@ -659,6 +710,23 @@ function App() {
                 </span>
               )}
             </div>
+            {gpuAdapterName && gpuEnabled && (
+              <div className="power-row">
+                <span className="power-label">GPU power:</span>
+                <input
+                  type="range"
+                  className="power-slider"
+                  min={5}
+                  max={100}
+                  step={5}
+                  value={gpuPower}
+                  onChange={(e) => setGpuPower(Number(e.target.value))}
+                />
+                <span className="power-hint">
+                  {gpuPower}% -- independent from CPU power, same duty-cycle throttling
+                </span>
+              </div>
+            )}
             {gpuEnabled && gpuError && (
               <div className="power-row">
                 <span className="power-label" />
@@ -757,9 +825,9 @@ function App() {
                 <div className="stat-label">Attempts this session</div>
                 <div className="stat-value">{formatCount(sessionAttempts)}</div>
               </div>
-              <div className="stat-tile">
-                <div className="stat-label">Blocks won this session</div>
-                <div className="stat-value">{sessionBlocks}</div>
+              <div className="stat-tile" title="All-time count of blocks PikoPool itself has won, across every participant -- not scoped to this session or this installation.">
+                <div className="stat-label">Blocks won by the pool</div>
+                <div className="stat-value">{poolBlocksWon !== null ? formatCount(poolBlocksWon) : "..."}</div>
               </div>
               <div className="stat-tile" title="From mother's own lifetime leaderboard, which only counts blocks submitted under your own principal -- a pool win is submitted by PikoPool's principal instead, so it's never included here even though you still get paid your share.">
                 <div className="stat-label">Blocks won solo (lifetime)</div>

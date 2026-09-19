@@ -522,14 +522,13 @@ section.block > *:last-child {
   white-space: nowrap;
 }
 
-.power-buttons {
-  display: flex;
-  gap: 6px;
-}
-
-.power-btn.active {
-  background: var(--accent);
-  color: var(--accent-ink);
+.power-slider {
+  flex: 1 1 140px;
+  min-width: 120px;
+  max-width: 220px;
+  accent-color: var(--accent);
+  height: 4px;
+  cursor: pointer;
 }
 
 .power-hint {

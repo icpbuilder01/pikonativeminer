@@ -46,7 +46,11 @@ struct AppState {
     principal_text: String,
     mining_stop: Arc<AtomicBool>,
     mining_running: Arc<AsyncMutex<bool>>,
-    power_percent: Arc<AtomicU32>,
+    // Separate dials, not one shared value -- reported live that CPU and
+    // GPU throttling being tied together made it impossible to run each
+    // at a setting appropriate for its own hardware/thermals.
+    cpu_power_percent: Arc<AtomicU32>,
+    gpu_power_percent: Arc<AtomicU32>,
     // Probed once at startup (see gpu::probe) -- cheap, but no reason to
     // redo the adapter enumeration on every single UI query.
     gpu_adapter_name: Option<String>,
@@ -264,14 +268,27 @@ async fn start_mining(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     let stop_flag = Arc::clone(&state.mining_stop);
     let agent = Arc::clone(&state.agent);
     let running_flag = Arc::clone(&state.mining_running);
-    let power_percent = Arc::clone(&state.power_percent);
+    let cpu_power_percent = Arc::clone(&state.cpu_power_percent);
+    let gpu_power_percent = Arc::clone(&state.gpu_power_percent);
     let gpu_enabled = Arc::clone(&state.gpu_enabled);
     let gpu_error = Arc::clone(&state.gpu_error);
     let pool_enabled = Arc::clone(&state.pool_enabled);
     let app_handle = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        mining_supervisor(app_handle, agent, owner, stop_flag, running_flag, power_percent, gpu_enabled, gpu_error, pool_enabled).await;
+        mining_supervisor(
+            app_handle,
+            agent,
+            owner,
+            stop_flag,
+            running_flag,
+            cpu_power_percent,
+            gpu_power_percent,
+            gpu_enabled,
+            gpu_error,
+            pool_enabled,
+        )
+        .await;
     });
 
     Ok(())
@@ -283,12 +300,21 @@ async fn stop_mining(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Sets the live power level (0-100, 100 = full speed) -- picked up
-/// immediately by any already-running mining threads, same idea as the
-/// browser site's own Low/High/Max dutyCycle control.
+/// Sets the live CPU power level (5-100, 100 = full speed, no throttling
+/// at all) -- picked up immediately by any already-running CPU hashing
+/// threads. Separate from GPU power below: reported live that sharing one
+/// dial made it impossible to run each at a setting suited to its own
+/// hardware.
 #[tauri::command]
-fn set_power_percent(state: State<'_, AppState>, percent: u32) -> Result<(), String> {
-    state.power_percent.store(percent.clamp(1, 100), Ordering::Relaxed);
+fn set_cpu_power_percent(state: State<'_, AppState>, percent: u32) -> Result<(), String> {
+    state.cpu_power_percent.store(percent.clamp(5, 100), Ordering::Relaxed);
+    Ok(())
+}
+
+/// Same as set_cpu_power_percent, but for the GPU search thread only.
+#[tauri::command]
+fn set_gpu_power_percent(state: State<'_, AppState>, percent: u32) -> Result<(), String> {
+    state.gpu_power_percent.store(percent.clamp(5, 100), Ordering::Relaxed);
     Ok(())
 }
 
@@ -357,12 +383,13 @@ async fn get_my_pool_share(state: State<'_, AppState>) -> Result<(String, String
 /// from half to several times the real hashrate depending on the window.
 /// Distinct-participant count is exact and a more useful figure anyway.
 #[tauri::command]
-async fn get_pool_stats(state: State<'_, AppState>) -> Result<(String, String, String), String> {
+async fn get_pool_stats(state: State<'_, AppState>) -> Result<(String, String, String, String), String> {
     let stats = agent::get_pool_stats(&state.agent).await.map_err(|e| e.to_string())?;
     Ok((
         nat_to_plain_string(&stats.currentRoundTotalShares),
         nat_to_plain_string(&stats.activeMinersThisRound),
         nat_to_plain_string(&stats.activeMinersNow),
+        nat_to_plain_string(&stats.blocksWon),
     ))
 }
 
@@ -380,7 +407,8 @@ async fn mining_supervisor(
     owner: Principal,
     stop_flag: Arc<AtomicBool>,
     running_flag: Arc<AsyncMutex<bool>>,
-    power_percent: Arc<AtomicU32>,
+    cpu_power_percent: Arc<AtomicU32>,
+    gpu_power_percent: Arc<AtomicU32>,
     gpu_enabled: Arc<AtomicBool>,
     gpu_error: Arc<StdMutex<Option<String>>>,
     pool_enabled: Arc<AtomicBool>,
@@ -492,7 +520,7 @@ async fn mining_supervisor(
         let cpu_threads = miner::start_mining(
             job,
             num_threads,
-            Arc::clone(&power_percent),
+            Arc::clone(&cpu_power_percent),
             Arc::clone(&job_stop_flag),
             Arc::clone(&job_hash_count),
             tx.clone(),
@@ -503,7 +531,7 @@ async fn mining_supervisor(
         if gpu_enabled.load(Ordering::Relaxed) {
             if let Some(gpu_thread) = gpu::start_gpu_mining(
                 job,
-                Arc::clone(&power_percent),
+                Arc::clone(&gpu_power_percent),
                 Arc::clone(&job_stop_flag),
                 Arc::clone(&job_hash_count),
                 tx.clone(),
@@ -853,7 +881,8 @@ pub fn run() {
                 principal_text,
                 mining_stop: Arc::new(AtomicBool::new(false)),
                 mining_running: Arc::new(AsyncMutex::new(false)),
-                power_percent: Arc::new(AtomicU32::new(100)),
+                cpu_power_percent: Arc::new(AtomicU32::new(100)),
+                gpu_power_percent: Arc::new(AtomicU32::new(100)),
                 gpu_adapter_name,
                 gpu_enabled: Arc::new(AtomicBool::new(false)),
                 gpu_error: Arc::new(StdMutex::new(None)),
@@ -912,7 +941,8 @@ pub fn run() {
             set_autostart,
             start_mining,
             stop_mining,
-            set_power_percent,
+            set_cpu_power_percent,
+            set_gpu_power_percent,
             gpu_adapter_name,
             get_gpu_enabled,
             set_gpu_enabled,
