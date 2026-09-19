@@ -555,17 +555,49 @@ async fn mining_supervisor(
                         match agent::submit_share(&agent, target_height, nonce).await {
                             Ok(types::ShareResult::Ok(outcome)) => {
                                 if outcome.isBlockWinner {
-                                    session_blocks += 1;
-                                    let msg = match &outcome.poolSubmitResult {
+                                    // isBlockWinner only means the nonce cleared the real
+                                    // network difficulty -- pikopool still has to actually
+                                    // submit it to mother and get paid before anyone's
+                                    // owed anything. Only the genuine Ok case is a real
+                                    // win: an Err here (e.g. pikopool's own ICP balance
+                                    // too low to cover the fee, IcpFeeFailed) means this
+                                    // winning nonce was found but the round was NOT paid
+                                    // out or reset -- reporting that as "reward pending"
+                                    // would be a straight-up false positive, and bumping
+                                    // session_blocks would make this session's own count
+                                    // lie about what actually got paid.
+                                    match &outcome.poolSubmitResult {
                                         Some(types::SubmitResult::Ok(ok)) => {
-                                            format!(
+                                            session_blocks += 1;
+                                            let msg = format!(
                                                 "Pool won block #{}! Reward split is credited by the pool -- claim it from there.",
                                                 nat_to_plain_string(&ok.height)
-                                            )
+                                            );
+                                            emit_progress(&app, 0, session_attempts, session_blocks, &msg, "good");
                                         }
-                                        _ => "Pool found a winning share -- reward pending".to_string(),
-                                    };
-                                    emit_progress(&app, 0, session_attempts, session_blocks, &msg, "good");
+                                        Some(types::SubmitResult::Err(err)) => {
+                                            emit_progress(
+                                                &app,
+                                                0,
+                                                session_attempts,
+                                                session_blocks,
+                                                &format!(
+                                                    "Found a winning share, but the pool failed to submit it to mother ({err:?}) -- this win was missed, still mining."
+                                                ),
+                                                "critical",
+                                            );
+                                        }
+                                        None => {
+                                            emit_progress(
+                                                &app,
+                                                0,
+                                                session_attempts,
+                                                session_blocks,
+                                                "Found a winning share, but the pool didn't report a submission result -- still mining.",
+                                                "critical",
+                                            );
+                                        }
+                                    }
                                 } else {
                                     emit_progress(&app, 0, session_attempts, session_blocks, "Share accepted by the pool", "");
                                 }
