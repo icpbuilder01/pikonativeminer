@@ -1,6 +1,6 @@
 [package]
 name = "pikonativeminer"
-version = "0.1.11"
+version = "0.1.12"
 description = "A Tauri App"
 authors = ["you"]
 license = "MIT"
@@ -38,6 +38,8 @@ tauri-plugin-single-instance = "2"
 wgpu = "22"
 pollster = "0.3"
 bytemuck = { version = "1", features = ["derive"] }
+tauri-plugin-updater = "2.13.1"
+tauri-plugin-process = "2.4.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

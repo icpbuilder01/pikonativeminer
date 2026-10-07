@@ -409,7 +409,7 @@ mod tests {
         let power_percent = Arc::new(AtomicU32::new(100));
         let (tx, rx) = std::sync::mpsc::channel();
 
-        let handle = start_gpu_mining(job, power_percent, Arc::clone(&stop_flag), hash_count, tx, None)
+        let handle = start_gpu_mining(job, power_percent, Arc::clone(&stop_flag), hash_count, tx, None, Arc::new(StdMutex::new(None)))
             .expect("adapter was just probed as available");
 
         let nonce = rx
@@ -455,6 +455,7 @@ mod tests {
                 Arc::clone(&hash_count),
                 tx,
                 share_bits.map(|_| share_tx),
+                Arc::new(StdMutex::new(None)),
             )
             .expect("adapter was just probed as available");
             let start = Instant::now();

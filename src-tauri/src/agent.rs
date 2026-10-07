@@ -14,6 +14,9 @@ pub const MOTHER_CANISTER_ID: &str = "45mjf-rqaaa-aaaaj-qsedq-cai";
 // motherId/pikoLedgerId/icpLedgerId locked to the real mainnet values and
 // already funded/approved to pay mother's mining fee.
 pub const POOL_CANISTER_ID: &str = "feqm6-7aaaa-aaaap-quzsa-cai";
+// PikoPixel's canister (~/pikoplace) -- only read here, for the sponsored
+// text slots shown in the app's banner.
+pub const PLACE_CANISTER_ID: &str = "cpihg-xqaaa-aaaac-bf4ba-cai";
 pub const ICP_LEDGER_CANISTER_ID: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 pub const PIKO_LEDGER_CANISTER_ID: &str = "56aad-fiaaa-aaaaj-qsefa-cai";
 // DFINITY's recommended mainnet endpoint for a raw agent (not going through
@@ -93,6 +96,18 @@ pub async fn submit_proof(agent: &Agent, nonce: u64) -> Result<SubmitResult> {
         .context("submitProof call failed")?;
     let result = Decode!(response.as_slice(), SubmitResult)?;
     Ok(result)
+}
+
+pub async fn get_active_ads(agent: &Agent) -> Result<Vec<Ad>> {
+    let canister_id = Principal::from_text(PLACE_CANISTER_ID)?;
+    let response = agent
+        .query(&canister_id, "getActiveAds")
+        .with_arg(Encode!()?)
+        .call()
+        .await
+        .context("getActiveAds call failed")?;
+    let ads = Decode!(response.as_slice(), Vec<Ad>)?;
+    Ok(ads)
 }
 
 pub async fn get_pool_config(agent: &Agent) -> Result<PoolConfig> {

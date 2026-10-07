@@ -218,3 +218,12 @@ pub struct Allowance {
     pub allowance: Nat,
     pub expires_at: Option<u64>,
 }
+
+// --- PikoPixel sponsored slots (~/pikoplace, place canister) ---
+
+// Subset of place's own Ad record: only what the banner shows.
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct Ad {
+    pub text: String,
+    pub link: Option<String>,
+}

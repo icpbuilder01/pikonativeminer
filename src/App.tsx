@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Confetti } from "./components/Confetti";
+import { SponsoredBanner } from "./components/SponsoredBanner";
+import { UpdateButton } from "./components/UpdateButton";
 import "./App.css";
 
 interface MiningProgress {
@@ -510,6 +512,7 @@ function App() {
           <div className="brand-sub">Real hardware-accelerated hashing, no browser needed</div>
         </div>
         <div className="header-actions">
+          <UpdateButton />
           {autostart !== null && (
             <label className="autostart-toggle">
               <input type="checkbox" checked={autostart} onChange={handleToggleAutostart} />
@@ -521,6 +524,8 @@ function App() {
           </button>
         </div>
       </header>
+
+      <SponsoredBanner />
 
       {!principal ? (
         <p className="empty-state">Loading your local identity...</p>
