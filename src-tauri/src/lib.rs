@@ -393,6 +393,21 @@ async fn get_pool_stats(state: State<'_, AppState>) -> Result<(String, String, S
     ))
 }
 
+#[derive(Serialize)]
+struct AdView {
+    text: String,
+    link: Option<String>,
+}
+
+/// The sponsored text slots currently running on PikoPixel. Errors (e.g.
+/// the place canister unreachable) just mean no banner -- mining never
+/// depends on this.
+#[tauri::command]
+async fn get_active_ads(state: State<'_, AppState>) -> Result<Vec<AdView>, String> {
+    let ads = agent::get_active_ads(&state.agent).await.map_err(|e| e.to_string())?;
+    Ok(ads.into_iter().map(|ad| AdView { text: ad.text, link: ad.link }).collect())
+}
+
 #[tauri::command]
 async fn claim_pool_reward(state: State<'_, AppState>) -> Result<String, String> {
     match agent::claim_pool_reward(&state.agent).await.map_err(|e| e.to_string())? {
@@ -856,6 +871,11 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        // In-app updates: checks the latest GitHub Release's latest.json
+        // (see tauri.conf.json's plugins.updater), and only installs an
+        // update signed with the project's own updater key.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -954,6 +974,7 @@ pub fn run() {
             get_my_pool_share,
             get_pool_stats,
             claim_pool_reward,
+            get_active_ads,
             quit_app
         ])
         .run(tauri::generate_context!())

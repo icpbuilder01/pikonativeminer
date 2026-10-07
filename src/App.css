@@ -631,3 +631,45 @@ section.block > *:last-child {
     display: none;
   }
 }
+
+/* ---- Sponsored slots (rented on PikoPixel) ---- */
+
+.sponsored-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  background: var(--surface);
+  padding: 10px 14px;
+  margin-bottom: 22px;
+  border-style: solid;
+  border-width: 2px;
+  border-top-color: var(--bevel-hi);
+  border-left-color: var(--bevel-hi);
+  border-bottom-color: var(--bevel-lo);
+  border-right-color: var(--bevel-lo);
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+}
+
+.sponsored-label {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sponsored-text {
+  color: var(--text);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.sponsored-link {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
