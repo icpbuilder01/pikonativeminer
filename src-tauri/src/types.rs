@@ -226,4 +226,5 @@ pub struct Allowance {
 pub struct Ad {
     pub text: String,
     pub link: Option<String>,
+    pub suspicious: bool,
 }

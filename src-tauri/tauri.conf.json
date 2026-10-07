@@ -18,7 +18,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
@@ -35,7 +35,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlBOEFDMTlFMTkxOUUzRDgKUldUWTR4a1puc0dLbWkyUW1tdHdHYzEvT0YxQU9lQ2kxZWhmc1Zwa203Lzh5Qkx0VktpSnJEbW0K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFDRDA4MUY1RkE4NDUxOUIKUldTYlVZVDY5WUhRckZVeUVmSUd0QnIxMmVZMzl4QUxZS2JaV0lWR1lnNWE2NFZOWTdRMGorOS8K",
       "endpoints": [
         "https://github.com/icpbuilder01/pikonativeminer/releases/latest/download/latest.json"
       ]
