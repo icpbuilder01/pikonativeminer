@@ -227,4 +227,6 @@ pub struct Ad {
     pub text: String,
     pub link: Option<String>,
     pub suspicious: bool,
+    // 32x16 palette indices; null once the ad is reported as suspicious.
+    pub image: Option<Vec<u8>>,
 }

@@ -398,6 +398,7 @@ struct AdView {
     text: String,
     link: Option<String>,
     suspicious: bool,
+    image: Option<Vec<u8>>,
 }
 
 /// The sponsored text slots currently running on PikoPixel. Errors (e.g.
@@ -406,7 +407,7 @@ struct AdView {
 #[tauri::command]
 async fn get_active_ads(state: State<'_, AppState>) -> Result<Vec<AdView>, String> {
     let ads = agent::get_active_ads(&state.agent).await.map_err(|e| e.to_string())?;
-    Ok(ads.into_iter().map(|ad| AdView { text: ad.text, link: ad.link, suspicious: ad.suspicious }).collect())
+    Ok(ads.into_iter().map(|ad| AdView { text: ad.text, link: ad.link, suspicious: ad.suspicious, image: ad.image }).collect())
 }
 
 #[tauri::command]

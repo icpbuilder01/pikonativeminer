@@ -680,3 +680,10 @@ section.block > *:last-child {
   font-size: 0.74rem;
   font-weight: 700;
 }
+
+.sponsored-image {
+  display: block;
+  width: 96px;
+  height: 48px;
+  image-rendering: pixelated;
+}
