@@ -1,10 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 interface Ad {
   text: string;
   link: string | null;
   suspicious: boolean;
+  image: number[] | null;
+}
+
+// Same 18 colors as PikoPixel's canvas: ad images are 32x16 indices into it.
+const PALETTE = [
+  "#ffffff", "#d4d7d9", "#898d90", "#000000",
+  "#be0039", "#ff4500", "#ffa800", "#ffd635",
+  "#00a368", "#7eed56", "#009eaa", "#2450a4",
+  "#3690ea", "#51e9f4", "#811e9f", "#b44ac0",
+  "#ff99aa", "#6d482f",
+];
+const IMAGE_WIDTH = 32;
+const IMAGE_HEIGHT = 16;
+
+function AdImage({ image }: { image: number[] }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const ctx = ref.current?.getContext("2d");
+    if (!ctx) return;
+    for (let i = 0; i < IMAGE_WIDTH * IMAGE_HEIGHT; i++) {
+      ctx.fillStyle = PALETTE[image[i]] ?? PALETTE[0];
+      ctx.fillRect(i % IMAGE_WIDTH, Math.floor(i / IMAGE_WIDTH), 1, 1);
+    }
+  }, [image]);
+  return <canvas ref={ref} className="sponsored-image" width={IMAGE_WIDTH} height={IMAGE_HEIGHT} />;
 }
 
 const POLL_MS = 5 * 60_000;
@@ -41,6 +66,7 @@ export function SponsoredBanner() {
       {ad.suspicious && (
         <span className="sponsored-warning">⚠ Reported as suspicious by several players -- be extra careful</span>
       )}
+      {ad.image && <AdImage image={ad.image} />}
       <span className="sponsored-text">{ad.text}</span>
       {ad.link && <span className="sponsored-link">{ad.link}</span>}
     </aside>
