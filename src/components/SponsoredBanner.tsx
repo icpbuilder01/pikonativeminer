@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 interface Ad {
   text: string;
   link: string | null;
+  suspicious: boolean;
 }
 
 const POLL_MS = 5 * 60_000;
@@ -37,6 +38,9 @@ export function SponsoredBanner() {
   return (
     <aside className="sponsored-banner" aria-label="Sponsored">
       <span className="sponsored-label">Sponsored · not verified by PIKO · rent this slot on PikoPixel</span>
+      {ad.suspicious && (
+        <span className="sponsored-warning">⚠ Reported as suspicious by several players -- be extra careful</span>
+      )}
       <span className="sponsored-text">{ad.text}</span>
       {ad.link && <span className="sponsored-link">{ad.link}</span>}
     </aside>

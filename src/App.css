@@ -673,3 +673,10 @@ section.block > *:last-child {
   overflow-wrap: anywhere;
   user-select: all;
 }
+
+.sponsored-warning {
+  flex-basis: 100%;
+  color: var(--critical);
+  font-size: 0.74rem;
+  font-weight: 700;
+}

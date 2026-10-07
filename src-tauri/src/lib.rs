@@ -397,6 +397,7 @@ async fn get_pool_stats(state: State<'_, AppState>) -> Result<(String, String, S
 struct AdView {
     text: String,
     link: Option<String>,
+    suspicious: bool,
 }
 
 /// The sponsored text slots currently running on PikoPixel. Errors (e.g.
@@ -405,7 +406,7 @@ struct AdView {
 #[tauri::command]
 async fn get_active_ads(state: State<'_, AppState>) -> Result<Vec<AdView>, String> {
     let ads = agent::get_active_ads(&state.agent).await.map_err(|e| e.to_string())?;
-    Ok(ads.into_iter().map(|ad| AdView { text: ad.text, link: ad.link }).collect())
+    Ok(ads.into_iter().map(|ad| AdView { text: ad.text, link: ad.link, suspicious: ad.suspicious }).collect())
 }
 
 #[tauri::command]
