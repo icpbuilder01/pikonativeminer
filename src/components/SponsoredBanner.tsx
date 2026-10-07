@@ -8,7 +8,7 @@ interface Ad {
   image: number[] | null;
 }
 
-// Same 18 colors as PikoPixel's canvas: ad images are 32x16 indices into it.
+// Same 18 colors as PikoPixel's canvas: ad images are 64x32 indices into it.
 const PALETTE = [
   "#ffffff", "#d4d7d9", "#898d90", "#000000",
   "#be0039", "#ff4500", "#ffa800", "#ffd635",
@@ -16,8 +16,8 @@ const PALETTE = [
   "#3690ea", "#51e9f4", "#811e9f", "#b44ac0",
   "#ff99aa", "#6d482f",
 ];
-const IMAGE_WIDTH = 32;
-const IMAGE_HEIGHT = 16;
+const IMAGE_WIDTH = 64;
+const IMAGE_HEIGHT = 32;
 
 function AdImage({ image }: { image: number[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
