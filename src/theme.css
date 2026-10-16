@@ -1,0 +1,213 @@
+/* PIKO app theme, same as the website apps (night palette, one accent per
+   app, rounded cards). Layered over App.css: only tokens, surfaces and the
+   panel order change. Fonts are bundled because the webview CSP only allows
+   'self' (no Google Fonts). */
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("./assets/fonts/BricolageGrotesque-800.woff2") format("woff2");
+  font-weight: 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("./assets/fonts/InstrumentSans-var.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./assets/fonts/IBMPlexMono-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./assets/fonts/IBMPlexMono-600.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+
+:root:root {
+  color-scheme: dark;
+
+  /* The miner shares the mining site's identity color: mint green. */
+  --app: #3ddc97;
+  --app-2: #7cf5c4;
+  --app-ink: #021a10;
+
+  --bg: #0a0c16;
+  --surface: #12152a;
+  --surface-2: #0c0e1d;
+  --border: #252a4a;
+  --border-strong: #343b66;
+
+  --text: #eef0fa;
+  --text-secondary: #a9aecb;
+  --text-muted: #6d7398;
+
+  --accent: var(--app);
+  --accent-soft: color-mix(in srgb, var(--app) 16%, transparent);
+  --accent-ink: var(--app-ink);
+  --spark: var(--app);
+
+  --good: #4fe0a8;
+  --critical: #ff6b5e;
+
+  --mono-bg: #0c0e1d;
+  --mono-fg: #eef0fa;
+
+  --bevel-hi: #252a4a;
+  --bevel-lo: #252a4a;
+  --hard-shadow: rgba(0, 0, 0, 0.7);
+  --radius: 10px;
+
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --font-sans: "Instrument Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+body {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(900px 500px at 15% -10%, color-mix(in srgb, var(--app) 12%, transparent), transparent 70%),
+    radial-gradient(#1a1e3a 1px, transparent 1px);
+  background-size: auto, 22px 22px;
+  background-repeat: no-repeat, repeat;
+  background-attachment: fixed;
+}
+
+/* ---- Header as a top bar ---- */
+.header {
+  padding: 10px 12px 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 4px 4px 0 var(--hard-shadow);
+}
+.brand-logo {
+  width: 34px;
+  height: 34px;
+}
+.brand-name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+}
+.brand-name em {
+  font-style: normal;
+  color: var(--app);
+}
+.brand-sub {
+  color: var(--text-muted);
+}
+
+/* ---- Mine first: it's the primary action ---- */
+.panels > .panel-mine {
+  order: -1;
+}
+
+/* ---- Cards ---- */
+section.block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 4px 4px 0 var(--hard-shadow);
+}
+section.block h2 {
+  background: transparent;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 11px 16px;
+}
+section.block h2::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 9px;
+  background: var(--app);
+  vertical-align: 1px;
+}
+.panel-mine {
+  border-color: color-mix(in srgb, var(--app) 40%, var(--border));
+  box-shadow:
+    4px 4px 0 var(--hard-shadow),
+    0 30px 80px -40px color-mix(in srgb, var(--app) 55%, transparent);
+}
+.panel-mine h2 {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--app) 22%, transparent), transparent);
+}
+
+/* ---- Tiles, charts, wells ---- */
+.stat-tile,
+.wallet-balance-tile,
+.pool-subpanel,
+.difficulty-chart,
+.wallet-address,
+.sponsored-banner {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.sponsored-banner {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+.stat-label {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+.stat-value {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+/* ---- Buttons ---- */
+.button {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.button:active:not(:disabled) {
+  border-color: var(--border-strong);
+}
+.button-cta {
+  background: linear-gradient(180deg, var(--app-2), var(--app));
+  border-color: color-mix(in srgb, var(--app) 60%, #000);
+  color: var(--app-ink);
+}
+
+/* ---- Inputs ---- */
+.input {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.input:focus {
+  border-color: var(--app);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app) 25%, transparent);
+}
+.power-slider,
+input[type="checkbox"] {
+  accent-color: var(--app);
+}
+.token-toggle-btn {
+  border-radius: 8px;
+}
+
+a {
+  color: var(--app-2);
+}
