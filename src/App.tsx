@@ -5,6 +5,7 @@ import { Confetti } from "./components/Confetti";
 import { SponsoredBanner } from "./components/SponsoredBanner";
 import { UpdateButton } from "./components/UpdateButton";
 import "./App.css";
+import "./theme.css";
 
 interface MiningProgress {
   hashrate: number;
@@ -508,7 +509,9 @@ function App() {
       <header className="header">
         <img src="/piko-logo.svg" alt="" className="brand-logo" />
         <div>
-          <div className="brand-name">PIKO Native Miner</div>
+          <div className="brand-name">
+            PIKO <em>Native Miner</em>
+          </div>
           <div className="brand-sub">Real hardware-accelerated hashing, no browser needed</div>
         </div>
         <div className="header-actions">
@@ -660,7 +663,7 @@ function App() {
           <section className="block panel-mine">
             <h2>Mine</h2>
             <p className="hint">
-              Fund the wallet above with ICP, approve it below, then start mining -- your local
+              Fund the wallet below with ICP, approve it below, then start mining -- your local
               principal signs real hashing proofs directly, no browser required.
             </p>
             <div className="approve-row">
