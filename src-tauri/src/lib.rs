@@ -806,7 +806,13 @@ async fn mining_supervisor(
                 last_stale_check = now;
                 if let Ok(fresh) = agent::get_work(&agent).await {
                     let fresh_height: u64 = fresh.height.0.clone().try_into().unwrap_or(0);
-                    if fresh_height != target_height {
+                    let fresh_bits: u32 = fresh.difficultyBits.0.clone().try_into().unwrap_or(0);
+                    // mother lowers the effective difficulty by 1 bit per hour
+                    // without a block (idle decay), so the job also has to be
+                    // restarted when the difficulty changes at the same height
+                    // -- otherwise this search keeps aiming at the old, higher
+                    // target and never benefits from the decay.
+                    if fresh_height != target_height || fresh_bits != difficulty_bits {
                         handle.stop();
                         continue 'outer;
                     }
